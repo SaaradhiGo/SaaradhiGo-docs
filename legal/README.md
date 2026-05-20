@@ -27,6 +27,7 @@ SaaradhiGo / VahanGo needs in place before opening to paying users.
 | [mva-2020-driver-verification-sop.md](mva-2020-driver-verification-sop.md) | Driver onboarding standard operating procedure | Ops team internal |
 | [mva-2020-driver-verification-checklist.md](mva-2020-driver-verification-checklist.md) | Per-driver KYC checklist | Ops team fills one per driver |
 | [gst-tds-registration-guide.md](gst-tds-registration-guide.md) | What you have to file with the government | Finance / founder action items |
+| [credits-policy.md](credits-policy.md) | VahanGo Credits Policy — closed-loop credit balance, non-cashable, non-transferable. Referenced from the Terms of Service (§5.5–5.6). See also [ADR-0003](../adr/0003-closed-loop-wallet.md) for the RBI PPI rationale. | Every rider; in-app link from Wallet screen |
 
 ## Required placeholders
 

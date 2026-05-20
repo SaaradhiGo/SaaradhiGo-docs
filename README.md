@@ -23,6 +23,7 @@ Business + legal artefacts required before the Hyderabad pilot can go live:
 | [legal/mva-2020-driver-verification-sop.md](legal/mva-2020-driver-verification-sop.md) | Operations SOP for onboarding & verifying drivers per Motor Vehicles Aggregator Guidelines 2020. |
 | [legal/mva-2020-driver-verification-checklist.md](legal/mva-2020-driver-verification-checklist.md) | Per-driver fillable checklist used during the SOP. File one copy per applicant in the KYC archive. |
 | [legal/gst-tds-registration-guide.md](legal/gst-tds-registration-guide.md) | Step-by-step founder guide: GST (Sec 9(5) aggregator), TAN + TDS u/s 194O, Professional Tax, Shops & Establishments, GHMC trade licence. |
+| [legal/credits-policy.md](legal/credits-policy.md) | VahanGo Credits (closed-loop credit balance) — non-transferable, non-cashable, ₹2,000 cap, 12-month expiry. Frames credits as not-a-PPI for RBI purposes; see [ADR-0003](adr/0003-closed-loop-wallet.md). |
 | [business/pricing-phase-0.md](business/pricing-phase-0.md) | Phase-0 fare schedule (auto/hatchback/sedan/SUV), surge cap, cancellation policy, commission split, incentive + promo budgets, KPI watchlist. |
 
 ## How to use this repo

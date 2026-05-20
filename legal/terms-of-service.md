@@ -140,18 +140,28 @@ gateway partner (currently Cashfree Payments). [LEGAL REVIEW: confirm
 disclosures meet RBI requirements; confirm we are NOT a payment aggregator
 in our own right.]
 
-5.5 **SaaradhiGo Wallet.** Where the SaaradhiGo Wallet is offered, it is a
-**closed-loop platform wallet**. Wallet balance may be used only to pay for
-services on SaaradhiGo, is not transferable to other users, is not cashable
-out to a bank account, does not earn interest, and is subject to a maximum
-balance limit displayed in the app. The Wallet is not a Prepaid Payment
-Instrument within the meaning of the Reserve Bank of India's Master
-Directions on Prepaid Payment Instruments.
+5.5 **VahanGo Credits.** SaaradhiGo operates a closed-loop credit balance
+called *VahanGo Credits* for riders. Credits are non-transferable, non-
+cashable, expire 12 months after issue, and are subject to a maximum
+cumulative balance per rider. Credits may be earned only via refunds (where
+You opt for instant credit instead of a card / UPI refund), promotional
+campaigns, and customer-service goodwill credits — **You cannot top up
+Credits with external money** in Phase-0. Credits are not money, not a
+deposit, not a negotiable instrument, and not a Prepaid Payment Instrument
+within the meaning of the Reserve Bank of India's *Master Direction on
+Prepaid Payment Instruments, 2021*. Full terms are set out in the
+[VahanGo Credits Policy](credits-policy.md).
 
 5.6 **Refunds.** Where You are entitled to a refund (e.g. a Driver Partner-
 cancelled completed booking, a confirmed billing error, or a duplicate
-charge), refunds are processed to the original payment method within 5-7
-business days. Refunds are subject to verification.
+charge), You may choose at the time of refund:
+(a) **Refund to original payment method.** Processed via the payment
+gateway to the card / UPI / bank account that paid for the trip. Settles
+in 5-7 business days. Subject to gateway verification.
+(b) **Instant credit to VahanGo Credits.** Applied to Your VahanGo Credits
+balance within seconds. Subject to the cumulative credit cap; where the
+cap would be exceeded the refund is automatically processed to the
+original payment method instead.
 
 5.7 **Disputes.** If You believe a fare is incorrect, raise the dispute via
 in-app support within 30 days of the trip. Disputes raised after 30 days
