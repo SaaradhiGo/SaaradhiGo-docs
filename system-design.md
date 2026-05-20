@@ -234,6 +234,7 @@ Each context maps to a Django app under `servers/`. A context owns its database 
 | Supply        | `driver` Django app          | Same; settlement may split into ledger service |
 | Demand        | `rider` Django app           | Same                                   |
 | Trip          | `ride` + `consumers.py`      | Same; matching extracted as a service for multi-city |
+| Pricing       | `pricing` Django app (ServiceZone + RateCard; see [ADR-0002](adr/0002-multi-city-pricing.md)) | Same + a SurgeRule table for per-zone editable rule sets |
 | Payments      | `payments` Django app        | Same + a dedicated reconciliation worker |
 | Operations    | `support` + ad-hoc           | Dedicated ops/SOS app + audit service  |
 
@@ -532,7 +533,7 @@ flowchart LR
 
 ### 7.1 Postgres — primary store
 
-Single logical database, multiple schemas mapped to Django app namespaces. PostGIS extension enabled for service-area polygons and trip pickup geometry.
+Single logical database, multiple schemas mapped to Django app namespaces. Service-area polygons are stored as GeoJSON in `JSONField` columns with point-in-polygon evaluated in-process via Shapely — PostGIS is **not** a Phase-1 dependency (see [ADR-0002](adr/0002-multi-city-pricing.md)). The model is forward-compatible: when the active-zone count crosses ~100, a future migration converts the column to PostGIS `PolygonField` with a spatial index. Trip pickup geometry stays in Postgres as decimal lat/long today; geo-indexing for matching lives in Redis (`drivers:geo`, `riders:geo`).
 
 ```mermaid
 erDiagram
@@ -724,7 +725,7 @@ We standardise on **Riverpod 3** across both apps. The current hybrid Provider +
 | Driver background verification + police verification | `Driver.police_verification_status` + KYC approval gate           |
 | Vehicle insurance / permit / fitness / PUC validity| Per-vehicle expiry fields + daily Celery job + auto-block on expiry |
 | Driver fatigue cap (12 hours active in 24h)        | `DriverShift` aggregate + accept gate                               |
-| Surge cap (max 1.5× base)                          | Hard-coded ceiling in `Pricing.compute_surge`                       |
+| Surge cap (max 1.5× base)                          | Per-zone `RateCard.surge_cap_multiplier`, enforced centrally in `pricing.services.quote_fare` (see [ADR-0002](adr/0002-multi-city-pricing.md)) |
 | Fare receipts                                      | Generated PDF/email on trip complete                                |
 | Data localisation                                  | Primary DB and S3 in `ap-south-1` (Mumbai); KYC never leaves region |
 

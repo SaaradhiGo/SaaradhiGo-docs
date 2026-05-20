@@ -296,27 +296,60 @@ emerges.
 
 ## What to seed into the database
 
-For engineering reference — minimum row set for the `VehicleFarePricing`
-table:
+> **Now data-driven.** As of [ADR-0002](../adr/0002-multi-city-pricing.md)
+> pricing lives in two tables (`pricing_servicezone` +
+> `pricing_ratecard`), not the old `VehicleFarePricing` table. A
+> Django migration seeds the Hyderabad zone + the schedule below the
+> first time the new code reaches a fresh DB; for an existing DB the
+> same migration ports every legacy `VehicleFarePricing` row to a
+> Hyderabad-scoped `RateCard`. There is **no manual SQL step** any
+> more for Hyderabad.
 
-```sql
-INSERT INTO ride_vehiclefarepricing (vehicle_type_id_id, base_fare, per_km_fare, per_min_fare, min_fare, night_surge_multiplier, source_label)
-VALUES
-  ((SELECT id FROM driver_vehicletype WHERE type='auto'),     30, 12.00, 1.50,  40, 1.25, 'phase0'),
-  ((SELECT id FROM driver_vehicletype WHERE type='hatchback'), 45, 14.00, 1.50,  70, 1.25, 'phase0'),
-  ((SELECT id FROM driver_vehicletype WHERE type='sedan'),     60, 17.00, 2.00, 100, 1.25, 'phase0'),
-  ((SELECT id FROM driver_vehicletype WHERE type='suv'),      100, 23.00, 2.50, 150, 1.25, 'phase0');
-```
+### To launch another city later
 
-(Field names + an exact migration helper come from a follow-up
-engineering PR. Ops can ask engineering to ship a one-time data
-migration for these once you confirm the numbers.)
+This is now a data operation, not an engineering ticket:
 
-Set `PLATFORM_COMMISSION_PERCENT=20` in `.env.prod`. Per-vehicle-type
-overrides for auto/hatchback go into the model itself if/when the
-schema gains a per-type commission field; for Phase-0 the simplest
-operational fix is to set a single 18% commission and accept the higher
-sedan/SUV margin slips a bit.
+1. Open the Django admin (or hit `POST /api/v1/pricing/admin/zones/`)
+   as a platform admin and create a `ServiceZone` row:
+   * `code` -- stable identifier, e.g. `IN-KA-BLR` for Bangalore
+   * `name`, `country`, `state_code`, `city`
+   * `zone_type` -- usually `city`
+   * `polygon_geojson` -- a GeoJSON `Polygon` around the metro
+   * `priority` -- 10 for a city zone; 100 for an airport sub-zone
+   * `is_active` -- false while you stage rate cards, then flip true
+2. For each vehicle type, create a `RateCard` row scoped to that
+   zone with the Phase-0 columns: `base_fare`, `per_km_fare`,
+   `per_min_fare`, `min_fare`, `night_surge_multiplier`,
+   `surge_cap_multiplier` (default 1.50 per MVA 2020),
+   `commission_percent`, `gst_percent`.
+3. Smoke-test the new schedule with
+   `POST /api/v1/pricing/quote/` (a stateless quote endpoint;
+   does **not** create a Trip).
+4. Flip `is_active=true` on the zone. Riders in that polygon stop
+   seeing `OUT_OF_SERVICE_AREA`.
+
+### To schedule a rate change
+
+Insert a new `RateCard` with a future `effective_from`. The
+resolver picks it up automatically at that timestamp; no code
+change, no deploy. To roll back, set `effective_to = now()` on the
+bad card -- the resolver falls back to the previous card.
+
+### Phase-0 default schedule
+
+If the database is fresh (no legacy `VehicleFarePricing` rows), the
+0002 data migration seeds Hyderabad with:
+
+| Vehicle type | Base | Per km | Per min | Min fare | Night surge | Commission |
+|---|---|---|---|---|---|---|
+| auto       | ₹30  | ₹12 | ₹1.50 | ₹40  | 1.25× | 18% |
+| hatchback  | ₹45  | ₹14 | ₹2.00 | ₹70  | 1.25× | 18% |
+| sedan      | ₹60  | ₹17 | ₹2.50 | ₹100 | 1.25× | 20% |
+| suv        | ₹100 | ₹23 | ₹3.00 | ₹150 | 1.25× | 20% |
+
+These numbers can be edited row-by-row from Django admin. The MVA
+2020 1.50× surge cap is applied per row -- `surge_cap_multiplier`
+defaults to `1.50` for every seeded card.
 
 ---
 
