@@ -85,8 +85,14 @@ against the merged code in dev.
   [SaaradhiGo-web](https://github.com/SaaradhiGo/SaaradhiGo-web).
 - [x] OTP login + Dashboard + Trips + Drivers (with KYC approve) +
   Support tickets + Zones pages.
-- [ ] Phase-1: Driver detail, Trip detail, Support reply UI, CSV
-  export, refresh-token rotation, live map. See
+- [x] **Trip detail page** at `/trips/<id>`. Backend aggregate at
+  `GET /api/v1/ride/admin/trips/<id>/` returns rider + driver +
+  vehicle + fare breakdown + payments + ratings + receipts (with
+  PDF links) + chat thread + driver cancellations + SOS events +
+  promo redemption in one round-trip. Header has refund (to-credits
+  or to-original) + resend-receipt actions.
+- [ ] Phase-1: Driver detail page, Support reply UI, CSV export,
+  refresh-token rotation, live map. See
   [ADR-0005](../adr/0005-ops-web-console.md).
 
 ### Multi-city
@@ -170,7 +176,7 @@ These cannot be done by engineering. Listed by hard deadline.
 * Multi-city expansion beyond the 4 Phase-0 cities (Bangalore +
   Chennai + Mumbai are the obvious Phase-1 candidates).
 * ML-based surge pricing (Phase-3, ≥6 months of trip data).
-* Ops console driver-detail + trip-detail + support-reply pages.
+* Ops console **driver-detail + support-reply** pages.
 * Ops console refresh-token rotation + CSV export + live map.
 * Sustained-load + chaos testing.
 
