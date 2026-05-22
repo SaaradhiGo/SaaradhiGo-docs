@@ -1,9 +1,9 @@
 # Phase-0 launch-readiness checklist
 
 A short, opinionated punch-list of what must be true on launch day for
-the Hyderabad pilot, what's already shipped, and what still needs
-founder action. Updated against the merged code in dev as of
-2026-05-22.
+the Phase-0 cities (Hyderabad + Vijayawada + Warangal + Visakhapatnam),
+what's already shipped, and what still needs founder action. Updated
+against the merged code in dev.
 
 ## Shipped engineering (no further action)
 
@@ -41,10 +41,11 @@ founder action. Updated against the merged code in dev as of
   `ap-south-1` (Mumbai).
 
 ### GST + tax
-- [x] **CGST §31 invoicing.** `Receipt` model + HTML email on
-  trip-complete + resend endpoint
-  (`/api/v1/ride/trip/<id>/receipt/resend/`). GST captured per
-  RateCard at issue time. PDF flavour deferred to Phase-1.
+- [x] **CGST §31 invoicing.** `Receipt` model + HTML email + **PDF
+  attachment** on trip-complete + resend endpoint
+  (`/api/v1/ride/trip/<id>/receipt/resend/`) + PDF URL endpoint
+  (`/api/v1/ride/trip/<id>/receipt/pdf/`). GST captured per
+  RateCard at issue time.
 - [x] **TDS u/s 194O guide** at
   [legal/gst-tds-registration-guide.md](../legal/gst-tds-registration-guide.md).
 
@@ -75,6 +76,34 @@ founder action. Updated against the merged code in dev as of
 - [x] **Foreground service** for trip-in-progress (India OEM
   compatibility).
 - [x] **VahanGo Credits UI** with server-flag-driven Add Money button.
+- [x] **In-trip chat** (`lib/screens/home/trip_chat_screen.dart` +
+  `chat_service.dart`). See [ADR-0004](../adr/0004-in-trip-chat.md).
+- [x] **Promo code entry** widget (`lib/widgets/promo_code_field.dart`).
+
+### Web ops console (Phase-0 MVP)
+- [x] **Next.js 14 + Tailwind app** at `apps/web/` in
+  [SaaradhiGo-web](https://github.com/SaaradhiGo/SaaradhiGo-web).
+- [x] OTP login + Dashboard + Trips + Drivers (with KYC approve) +
+  Support tickets + Zones pages.
+- [ ] Phase-1: Driver detail, Trip detail, Support reply UI, CSV
+  export, refresh-token rotation, live map. See
+  [ADR-0005](../adr/0005-ops-web-console.md).
+
+### Multi-city
+- [x] **Hyderabad** seeded.
+- [x] **Vijayawada (IN-AP-VJA)**, **Warangal (IN-TG-WGL)**, and
+  **Visakhapatnam (IN-AP-VTZ)** seeded with regional rate cards.
+  See [ADR-0006](../adr/0006-multi-city-expansion-vja-wgl-vtz.md).
+
+### Promos + rider rating
+- [x] **PromoCode + PromoRedemption** models + apply endpoint
+  (`POST /api/v1/ride/promo/apply/`) + admin CRUD via Django admin.
+  Supports percent + flat discounts, min-fare gate, zone scope,
+  per-user + global redemption caps.
+- [x] **Rider rating decay** via
+  `servers.rider.rating_decay.apply_rider_rating`. Below 3.0 ->
+  `flagged_for_review`; below 2.5 -> soft-block hint surfaces in the
+  driver-side payload so drivers can decline without penalty.
 
 ---
 
@@ -137,15 +166,12 @@ These cannot be done by engineering. Listed by hard deadline.
 ## Out of scope for Phase-0 (Phase-1 backlog)
 
 * Phone-masking proxy (Exotel/Knowlarity) integration.
-* PDF receipt generation (HTML email is enough for now).
-* Promo code redemption flow.
-* Rider rating decay / low-rating-rider flagging.
 * Co-branded PPI / own RBI PPI licence (for real wallet top-ups).
-* Multi-city expansion beyond Hyderabad (the *code* is ready;
-  business decisions on cities are not).
-* ML-based surge pricing.
-* In-app chat for rider ↔ driver.
-* Driver web console (currently Django admin only).
+* Multi-city expansion beyond the 4 Phase-0 cities (Bangalore +
+  Chennai + Mumbai are the obvious Phase-1 candidates).
+* ML-based surge pricing (Phase-3, ≥6 months of trip data).
+* Ops console driver-detail + trip-detail + support-reply pages.
+* Ops console refresh-token rotation + CSV export + live map.
 * Sustained-load + chaos testing.
 
 Track these in the project tracker; do not block Phase-0 on them.
