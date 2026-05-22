@@ -724,9 +724,13 @@ We standardise on **Riverpod 3** across both apps. The current hybrid Provider +
 | In-trip SOS / panic button                         | `/sos/` endpoint + SOS context + ops on-call                        |
 | Driver background verification + police verification | `Driver.police_verification_status` + KYC approval gate           |
 | Vehicle insurance / permit / fitness / PUC validity| Per-vehicle expiry fields + daily Celery job + auto-block on expiry |
-| Driver fatigue cap (12 hours active in 24h)        | `DriverShift` aggregate + accept gate                               |
+| Driver fatigue cap (12 hours active in 24h)        | `DriverSession` ledger + `servers.driver.fatigue.get_fatigue_status` + accept-time gate in `consumers._accept_trip`. Lockout stored on `Driver.fatigue_lockout_until` for O(1) checks. |
 | Surge cap (max 1.5× base)                          | Per-zone `RateCard.surge_cap_multiplier`, enforced centrally in `pricing.services.quote_fare` (see [ADR-0002](adr/0002-multi-city-pricing.md)) |
-| Fare receipts                                      | Generated PDF/email on trip complete                                |
+| Fare receipts (CGST §31)                           | `Receipt` model + `servers.ride.receipts.issue_receipt` (HTML email via SES on trip-complete; resend endpoint at `/api/v1/ride/trip/<id>/receipt/resend/`). PDF generation deferred to Phase-1. |
+| Notification opt-in / opt-out (DPDP)               | `NotificationPreference` model with marketing/promo default OFF; safety + transactional + payout categories cannot be turned off; dispatch via `servers.rider.notifications.create_notification`. |
+| Driver-side cancellation policy                    | `DriverCancellation` ledger + rolling 24h counter; 3 cancels → 1h online lockout (shares `Driver.fatigue_lockout_until`) + 0.1 rating decrement. Endpoint: `/api/v1/ride/trip/<id>/driver-cancel/`. |
+| Customer support                                   | `SupportTicket` + `SupportMessage` thread model; rider + admin endpoints under `/api/v1/support/`. |
+| Phone-call privacy                                 | Mobile uses OS dialer (`tel:` deep-link) — raw driver phone is never displayed in the rider UI. Phase-1 swaps in a masking proxy (Exotel / Knowlarity) with no UX change. |
 | Data localisation                                  | Primary DB and S3 in `ap-south-1` (Mumbai); KYC never leaves region |
 
 ### 11.2 DPDP Act 2023

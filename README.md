@@ -7,7 +7,7 @@ Central documentation repository for the SaaradhiGo / VahanGo ride-hailing platf
 - **[system-design.md](system-design.md)** — Top-level system architecture, covering Phase-0 (Hyderabad pilot) and the 12-month north-star target. Start here.
 - **[adr/](adr/)** — Architecture Decision Records. Short, dated records of significant decisions and their context. Add a new one (`adr/NNNN-title.md`) whenever a load-bearing decision is made.
 - **[diagrams/](diagrams/)** — Source files for diagrams that don't render inline as Mermaid (PlantUML, Excalidraw, etc.) and their exported SVG/PNG versions.
-- **[runbooks/](runbooks/)** — On-call runbooks: incident response, deploy/rollback, common alerts. Populated as the platform stabilises.
+- **[runbooks/](runbooks/)** — On-call runbooks: incident response, deploy/rollback, common alerts. Populated as the platform stabilises. Start with [runbooks/phase0-launch-readiness.md](runbooks/phase0-launch-readiness.md) — what's shipped, what still blocks the public launch.
 - **[legal/](legal/)** — User-facing legal documents and compliance SOPs (drafts; require Indian-qualified lawyer review before publication). See [legal/README.md](legal/README.md) for the index.
 - **[business/](business/)** — Phase-0 commercial decisions: pricing schedule, commission split, surge policy, incentive budgets, KPIs.
 
