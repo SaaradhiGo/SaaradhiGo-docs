@@ -91,8 +91,17 @@ against the merged code in dev.
   PDF links) + chat thread + driver cancellations + SOS events +
   promo redemption in one round-trip. Header has refund (to-credits
   or to-original) + resend-receipt actions.
-- [ ] Phase-1: Driver detail page, Support reply UI, CSV export,
-  refresh-token rotation, live map. See
+- [x] **Driver detail page** at `/drivers/<id>`. Backend aggregate
+  at `GET /api/v1/driver/admin/<id>/full/` returns user + KYC +
+  fatigue status + all vehicles (with credential expiries colour-
+  coded) + sessions + cancellation counters + withdrawals + recent
+  trips + earnings. Header has KYC approve / revoke actions.
+- [x] **Support ticket detail + reply** at `/support/<id>`. Renders
+  the thread with role-aware styling, posts replies via
+  `/support/admin/tickets/<id>/reply/` with optional state change,
+  assigns staff via `/support/admin/tickets/<id>/assign/`.
+- [ ] Phase-1: CSV export, refresh-token rotation, live map,
+  two-factor for admin login, audit log read view. See
   [ADR-0005](../adr/0005-ops-web-console.md).
 
 ### Multi-city
@@ -176,8 +185,8 @@ These cannot be done by engineering. Listed by hard deadline.
 * Multi-city expansion beyond the 4 Phase-0 cities (Bangalore +
   Chennai + Mumbai are the obvious Phase-1 candidates).
 * ML-based surge pricing (Phase-3, ≥6 months of trip data).
-* Ops console **driver-detail + support-reply** pages.
-* Ops console refresh-token rotation + CSV export + live map.
+* Ops console refresh-token rotation + CSV export + live map +
+  two-factor for admin login + audit log read view.
 * Sustained-load + chaos testing.
 
 Track these in the project tracker; do not block Phase-0 on them.
