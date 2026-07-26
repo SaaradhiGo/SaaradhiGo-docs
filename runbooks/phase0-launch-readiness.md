@@ -7,6 +7,41 @@ against the merged code in dev.
 
 ## Shipped engineering (no further action)
 
+### Launch-hardening batch (ADR-0007)
+- [x] **Trip transaction holds no network I/O.** Receipt render + S3 +
+  email moved to `ride.issue_receipt_for_trip` (Celery); pushes and Redis
+  writes go through `transaction.on_commit`; the Cashfree order is no
+  longer created inside the completion transaction.
+- [x] **Trip-group IDOR closed.** Only the rider and the assigned driver
+  join `trip_<id>`; candidate drivers can accept but never subscribe, and
+  losers get an explicit `trip_taken` + socket close.
+- [x] **Dispatch rebuilt.** Per-vehicle-type Redis geo keys (a sedan
+  request no longer misses sedans behind 50 nearer bikes), rolling
+  1500/3000/5000m waves, 90s accept timeout (was 600s), presence
+  heartbeats + a 60s ghost-driver sweeper, and no Postgres read per
+  location ping.
+- [x] **Commission priced per zone** from `RateCard.commission_percent`
+  as of the trip's request time. The old path read a global env var that
+  shipped defaulting to `0`.
+- [x] **Driver settlement split from rider credits** — `Wallet.scope`
+  with a unique `(user, scope)` constraint + backfill migration.
+- [x] **Cancellation attribution** (`cancelled_by`, `cancellation_reason`,
+  `cancellation_fee`) written by all three cancel paths and auto-cancel.
+- [x] **`/ride/trip/<id>/details/` authorised.** It previously served
+  driver name, phone and number plate to any authenticated caller who
+  guessed a trip id.
+- [x] **Maps key off the device.** New `/ride/maps/place-details` and
+  `/ride/maps/reverse-geocode` proxies; the app no longer calls Google
+  directly, no longer relays through `corsproxy.io`, and no longer routes
+  via the public OSRM demo server.
+- [x] **Webhook parity** — trip payments now re-verify `order_status` and
+  amount with Cashfree before settling, as wallet top-ups already did.
+- [x] **CI gates**: ruff + bandit + pip-audit + a missing-migration check,
+  a Redis service for the suite, and a deploy that runs migrations as a
+  discrete step with a health gate and automatic rollback.
+- [x] **Redis is no longer world-reachable**: loopback binding,
+  `requirepass`, AOF persistence, `noeviction`.
+
 ### MVA 2020 compliance
 - [x] **Service-area enforcement.** Pickup + drop must sit inside an
   active `ServiceZone` polygon. See
@@ -58,6 +93,17 @@ against the merged code in dev.
   Celery job sweeps stuck states every 10 min.
 
 ### Ops
+- [x] **Driver payout approval screen** at `/withdrawals` in the ops
+  console. Shows payee name, phone, UPI handle and KYC state before
+  release; Approve is disabled for a driver whose KYC is not approved.
+  Backed by the existing maker-checker
+  `/driver/admin/withdrawals/<id>/approve|reject/` endpoints, which had
+  no UI until now.
+- [x] **SOS triage queue** at `/sos` in the ops console, backed by a new
+  `GET /api/v1/sos/admin/`. Sorts unacknowledged-first, polls every 15s,
+  flags any open event older than the 5-minute response target, and
+  one-taps to the caller's phone and map location. Acknowledge / resolve /
+  false-alarm write immutable `SOSEventUpdate` rows as before.
 - [x] **/healthz** probe.
 - [x] **JSON logs.**
 - [x] **Sentry** wired (Django + Celery + Redis).
@@ -167,6 +213,16 @@ These cannot be done by engineering. Listed by hard deadline.
 
 ### Infrastructure
 - [ ] **Daily automated database backups** + a tested restore.
+- [ ] **Rotate the leaked Postgres password** (`PossibleMe2025`, previously
+  hardcoded in `docker-compose.override.yml`) on RDS and scrub it from git
+  history. The compose file now reads it from `.env.local`, but the value
+  is still in every clone's history.
+- [ ] **Rotate the Google Maps API key** shipped in past app builds and
+  restrict the new one to the backend's server IPs. Any key that has been
+  inside a released APK is public.
+- [ ] **Set `REDIS_PASSWORD` and the `redis://:PASSWORD@host` form of
+  `REDIS_URL`** in `.env.prod`, plus `JWT_SIGNING_KEY` and the
+  `EC2_HOST_KEY` GitHub secret (from `ssh-keyscan`).
 - [ ] **CloudWatch / Grafana alerts** for: error-rate spike, payment
   webhook failures, driver oncall queue depth, SOS event creation.
 - [ ] **AWS Secrets Manager** for production secrets (currently
