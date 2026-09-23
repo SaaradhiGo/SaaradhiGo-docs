@@ -107,3 +107,35 @@ commercial ones the shadow exists to inform — are listed in
 DRAFT until the shadow has run against real traffic and the fallback bands in the
 fare-finalisation design are chosen from that data. The decisions above are not
 expected to change; the thresholds derived from them are.
+
+## Defects this work uncovered
+
+Both were found by testing the **joins** over real infrastructure, not by testing
+the rules. Neither was visible to any unit test.
+
+**The trail discarded the end of every journey.** The writer resolved a ping's
+trip from the driver's status *at drain time*. The drain is periodic, so by the
+time it runs the pings from the end of a journey belong to a trip that has already
+completed — and they were dropped as "no active trip". Every measured distance was
+short by however far the driver travelled since the previous drain, and a lagging
+or restarted worker would lose an entire trail, making the trip read as having no
+telemetry at all. Fixed by matching each ping's `recorded_at` against each trip's
+collection window, with a bounded grace period for trips that have just ended.
+Two further properties came with the fix: a ping recorded before the driver was
+assigned is no longer attributed to the trip they later accepted (it was storing
+an idle driver's private movements), and a driver already on their next trip no
+longer has the previous trail merged in.
+
+**Surge demand silently counted zero.** `count_nearby_active_riders` passed
+`Decimal` coordinates to redis-py, which rejects them. The exception was caught
+and the function returned 0 — which is also a legitimate answer — so the only
+evidence was an ERROR log line. It surfaced because the fare shadow calls the
+canonical quote with coordinates read off a `Trip` row. `nearby_drivers`, which
+the whole dispatch pipeline depends on, had the same latent defect and was safe
+only because one call site remembered to wrap its arguments in `float()`. Fixed at
+the Redis boundary.
+
+The pattern is worth stating: the earlier wrong-Redis-database defect in this same
+writer, and both of these, were each found by a test that used real Redis and real
+PostgreSQL rather than mocks. Mocked tests prove the policy. Only the real thing
+proves the plumbing.
