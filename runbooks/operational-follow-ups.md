@@ -1,5 +1,9 @@
 # Operational follow-ups — raised by the PR 2 durable-dispatch rehearsal
 
+QA acceptance debt from the same rehearsal is tracked separately as
+**PR2-QA-FOLLOWUP** in
+[pr2-durable-dispatch-rehearsal.md](pr2-durable-dispatch-rehearsal.md).
+
 - **Status:** Open
 - **Raised:** 2026-09-22
 - **Source:** QA rehearsal of `SaaradhiGo-backend@41af60f` (ADR-0008)
@@ -9,9 +13,21 @@ blast radius.
 
 ---
 
-## 1. Separate Celery beat and improve worker availability — before pilot
+## OPS-1 — Celery production availability
 
-**Priority: highest of the three. Blocks production pilot.**
+**Priority: BLOCKS PRODUCTION PILOT.** Investigate and design separately; do
+not implement inside PR 3.
+
+Target shape, to be validated by that design work:
+
+```
+Backend  ->  Redis broker  ->  Celery Worker x N
+                              Celery Beat   x 1
+```
+
+Explicitly NOT a matter of scaling the current `worker -B` service: extra
+replicas would each run their own beat scheduler and double-fire every
+scheduled task.
 
 ADR-0008 moved dispatch onto Celery, which means **the worker is now on the
 critical booking path**. Before this change a dead worker meant no receipts
@@ -75,7 +91,7 @@ Proposed work:
 
 ---
 
-## 2. Structured dispatch log fields are not rendered in worker output
+## OPS-2 — Worker structured logging
 
 PR 2 emits `dispatch_started`, `dispatch_wave_started`,
 `dispatch_wave_candidates`, `dispatch_wave_offers`,
@@ -109,7 +125,7 @@ them.
 
 ---
 
-## 3. Two deployment stories — retire or repair the EC2 path
+## OPS-3 — Two deployment stories: retire or repair the EC2 path
 
 The repository has two deployment mechanisms and only one of them works:
 
