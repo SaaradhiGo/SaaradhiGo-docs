@@ -9,8 +9,9 @@
   on the critical path was mocked.
 - **PII:** no coordinates, phone numbers, OTPs, JWTs, document URLs or passwords
   appear below.
-- **Fixes:** `9701c8c` (dispatch-loop decoupling) and **`8e2ac37`** (the GPS echo —
-  this is the one that fixes the reported symptom). Both deployed to QA.
+- **Fixes:** `9701c8c` (dispatch-loop decoupling), **`8e2ac37`** (the GPS echo — this
+  is the one that fixes the reported symptom), and `c2c2b46` (the missing signal, plus
+  a real `ping`/`pong`). All deployed to QA and verified there.
 - **Reproduction suite:** `tests/test_lifecycle_under_gps_load.py`
 - **Verdict: GREEN.** A ten-minute QA ride with the driver's command socket never
   drained completes in 3.5s. Two app-side improvements are recommended but not
