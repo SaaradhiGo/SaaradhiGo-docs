@@ -122,6 +122,54 @@ Applying pricing.0006_trip_fare_shadow... OK
 
 QA `celery` was deliberately left without it. Production was not touched.
 
-Step 3's failure test has **not** been performed — the mechanism is proven to
-apply migrations, not yet proven to block a rollout on failure. That test should
-happen before production adopts it.
+## The failure rehearsal — performed, and it works
+
+Run in QA on 2026-09-23. The pre-deploy command was temporarily set to a migrate
+invocation that cannot succeed and cannot change anything:
+
+```
+python manage.py migrate ride 0099_deliberately_missing --noinput
+```
+
+`manage.py` rejects an unknown migration name before touching the database, so no
+DDL runs and no row moves. Exit code 1, verified locally first.
+
+**Result — the rollout was blocked, exactly as required:**
+
+| Observation | Evidence |
+|---|---|
+| Pre-deploy ran and failed | `CommandError: Cannot find a migration matching '0099_deliberately_missing' from app 'ride'.` then `Stopping Container` |
+| The new revision did NOT go live | deployment `f47447e6` status **FAILED** |
+| The previous healthy revision kept serving | deployment `8a4e99a0` stayed **SUCCESS**; `/healthz` returned 200 on every one of 12 probes across 300 s, with no gap |
+| Nothing persistent changed | the command errors before any schema work; `showmigrations` unchanged |
+
+The failing configuration was restored immediately afterwards.
+
+### A finding that matters for the runbook
+
+**Railway's `redeploy` reuses the previous deployment's configuration snapshot.**
+The first attempt at this rehearsal set the failing command and then used
+`redeploy` — and the pre-deploy container ran the *old* command
+(`migrate --noinput`, logging `No migrations to apply`) and the deployment
+succeeded. The experiment proved nothing until it was re-run through a real
+deployment (a git push).
+
+Two consequences:
+
+1. **A pre-deploy command change only takes effect on the next real deployment.**
+   Setting it and clicking redeploy does not apply it.
+2. **Restoring it also needs a real deployment**, which is why an empty commit was
+   pushed to bring QA back to the correct command.
+
+Anyone configuring this in production must push a commit to verify it, not
+redeploy.
+
+### Worker behaviour during the failure
+
+The `celery` service has no pre-deploy command and deploys independently, so it
+was unaffected: it kept consuming from the broker against the old, unchanged
+schema. That is the correct outcome here — but it is the reason the additive-only
+rule matters. Had the blocked migration been destructive, the worker would have
+been running old code against a schema the failed release never created, which is
+harmless, while the *reverse* (worker on new code, migration not yet applied)
+would not be. Migrations lead; code follows.
