@@ -144,3 +144,88 @@ argument for the pre-deploy is that a deploy which cannot migrate should not go
 live.
 
 Nothing else was created, scaled, deleted or repointed.
+
+---
+
+## Verifying you never have zero Beats, and never two for long
+
+The five steps above are ordered so that the **only** window with two schedulers
+is between step 1 and step 3, and the only way to get zero is to do step 3 before
+step 2's verification. Both conditions are directly observable.
+
+### The signal to watch
+
+Every scheduled task announces itself twice — once by the scheduler and once by
+the worker:
+
+```
+celery.beat              Scheduler: Sending due task gps-trail-drain-every-minute
+celery.worker.strategy   Task ride.persist_location_trail[<uuid>] received
+```
+
+The GPS drain runs **every 60 seconds**, which makes it the cheapest heartbeat
+available. Use it rather than the 15-minute or daily tasks.
+
+### Zero Beats
+
+**Symptom:** no `Scheduler: Sending due task` line anywhere for more than ~70
+seconds, and no `persist_location_trail ... received` on the worker.
+
+**When it can happen:** only if `-B` is removed (step 3) before the dedicated Beat
+service is confirmed scheduling (step 2). That is why step 2 is a verification and
+not a formality.
+
+**Check, on both services:**
+
+```bash
+railway logs --service celery --environment QA | grep -c "Sending due task"
+railway logs --service beat   --environment QA | grep -c "Sending due task"
+```
+
+Immediately after step 3, the worker's count must stop increasing and the Beat
+service's must keep increasing. If both stop, you have zero Beats — put `-B` back
+and diagnose the Beat service.
+
+**Standing alarm:** absence of `persist_location_trail` in the worker logs for
+more than 5 minutes. With a 60-second cadence, five minutes of silence means
+either no scheduler or no consumer, and both need someone.
+
+### Two Beats
+
+**Symptom:** the same task name appears **twice per tick**, a few milliseconds
+apart, with different task ids.
+
+```
+Scheduler: Sending due task gps-trail-drain-every-minute   <- 20:45:00
+Scheduler: Sending due task gps-trail-drain-every-minute   <- 20:45:00
+Task ride.persist_location_trail[aaa...] received
+Task ride.persist_location_trail[bbb...] received
+```
+
+**Check:** count receives per minute for one task. Exactly one is correct.
+
+```bash
+railway logs --service celery --environment QA \
+  | grep "persist_location_trail" | grep "received" | tail -20
+```
+
+Two ids in the same second is the fingerprint. Note that Railway's log pipeline
+**reorders lines**, so judge by the timestamps in the message, not by their order
+on screen — this has already caused one misdiagnosis in this project.
+
+**Acceptable duration:** the step 1→3 window only, which should be minutes.
+Leaving it longer means every periodic task runs twice: the GPS drain competes
+with itself for the same stream (harmless, because reads are claimed per consumer
+and the unique constraint absorbs re-processing, but it doubles the work), and the
+payment reconcilers sweep twice as often than intended.
+
+**Never scale the combined worker+Beat service.** Replicas are the one way to get
+two Beats *without* a visible configuration change, because each replica embeds
+its own `-B`. That is the reason step 5 is last.
+
+### A note on log severity
+
+Railway tags every Celery INFO line as `severity: error`, because Celery writes to
+stderr. Any alert rule of the form "page me on error logs" will therefore fire
+constantly and be muted, and then it will not fire when something real happens.
+Alert on the **absence** of the drain line, not on the presence of errors.

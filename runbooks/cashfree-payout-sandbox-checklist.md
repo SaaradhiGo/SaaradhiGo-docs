@@ -158,3 +158,52 @@ about a retry path that is already in production.
       statuses asserted to map to *skip*.
 - [ ] The refund-policy decision made, and only then
       `WITHDRAWAL_RECON_FAILURE_HANDLING_ENABLED` flipped.
+
+---
+
+## The single most important experiment (added on instruction)
+
+Everything else on this list is a lookup. This one is a live risk in production
+today.
+
+**Experiment: same `transferId`, twice.**
+
+```
+1. Create a payout in SANDBOX with a unique transferId, e.g.
+   transferId = "qa-idem-<yyyymmdd-hhmmss>"
+   amount     = the smallest the sandbox permits
+   mode       = upi, in-line beneficiary (exactly as create_upi_payout does)
+
+2. Record the full response verbatim.
+
+3. Repeat the IDENTICAL request, same transferId, no other change.
+
+4. Record the full response verbatim.
+
+5. In the Cashfree sandbox dashboard, count the transfers with that transferId.
+```
+
+**Record, in this file:**
+
+- [ ] response to the first request
+- [ ] response to the second request
+- [ ] HTTP status of each
+- [ ] whether the second returns an error, the original transfer, or a new one
+- [ ] **how many transfers exist in the dashboard afterwards: 1 or 2**
+- [ ] whether a Cashfree-side reference id is returned, and whether it differs
+      between the two responses
+
+**Why this is the priority.** `execute_upi_payout` retries up to three times with
+a deliberately stable `transferId` — the code comment says *"Do NOT include the
+current timestamp here. A retry should not accidentally create a second logical
+payout."* That is an assumption about Cashfree's idempotency, written into a retry
+loop, **never verified with the provider, and live in production.** If Cashfree
+treats a repeated `transferId` as a new transfer, a driver can be paid two or three
+times for one withdrawal. That outranks reconciliation entirely.
+
+**Never against production.** Sandbox only, and never with a `transferId` matching
+the production pattern `withdrawal_<id>_driver_<id>`.
+
+If the answer is "two transfers exist", the fix is immediate and does not wait for
+anything else: the retry loop must stop reusing the identifier, or must check
+status before retrying.
