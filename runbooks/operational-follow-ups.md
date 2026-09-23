@@ -149,6 +149,46 @@ Decide one of:
 
 Either is fine; having both, with one permanently broken, is not.
 
+### Ownership verdict (investigated 2026-09-22): **UNKNOWN — do not delete**
+
+The overnight pass was asked to classify the EC2 path as obsolete, intended, or
+unknown. The evidence points at *intended production, currently broken* rather
+than obsolete, so it was left in place:
+
+* **The secrets are provisioned.** The CI run log shows `EC2_SSH_KEY` and
+  `EC2_HOST` both set and masked; only `EC2_HOST_KEY` is empty. Someone
+  deliberately configured that, and `git log` dates the work: "feat: Implement
+  deploy actions", 2026-07-27.
+* **The architecture docs still describe AWS as production.** `system-design.md`
+  specifies CloudFront + ALB + ASG Daphne/Gunicorn + RDS Multi-AZ. Nothing in
+  it mentions Railway.
+* **Railway is undocumented.** Its configuration — start commands,
+  `RAILWAY_DOCKERFILE_PATH`, healthcheck, variables — exists only in the
+  dashboard; there is no `railway.json`, `railway.toml` or `.railway/` in the
+  repository. Railway looks like a QA environment stood up recently, not a
+  recorded production decision.
+* **The host is unreachable**, not merely missing a key: the `ssh-keyscan`
+  fallback cannot reach `EC2_HOST`, which is why the job fails even though two
+  of the three secrets exist.
+
+So the state is: a documented, secret-provisioned production path that no longer
+works, and an undocumented environment that does. That is an ownership question,
+not an engineering one, and the instruction for uncertain ownership is to
+document and stop. **The `deploy` job was not modified.**
+
+The decision needed in the morning is one sentence: *is production going to be
+AWS or Railway?* Everything else follows from it.
+
+* If **AWS**: repair `EC2_HOST_KEY` (`ssh-keyscan -H $EC2_HOST`), confirm the
+  instance is alive, and update `system-design.md` to note Railway is QA-only.
+* If **Railway**: delete the `deploy` job, commit a `railway.json` so the
+  deployment is reviewable in the repo, and revise `system-design.md` §
+  production topology, which currently describes infrastructure that is not
+  being used.
+
+Until then a red CI result still carries no information, because `test` and
+`lint` can both be green while the run shows failure.
+
 Related: the QA `backend` service's start command and `RAILWAY_DOCKERFILE_PATH`
 live only in the Railway dashboard. A committed `railway.json` would make the
 deployment reproducible and reviewable alongside the code.
