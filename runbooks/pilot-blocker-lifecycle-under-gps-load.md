@@ -383,21 +383,24 @@ at all.
    must not show a finished ride until the server says so. **This is the one that
    would have turned a silent data-integrity failure into a visible, recoverable
    one**, and it is worth more than either server fix.
-2. **Give the keepalive a real action.** The driver app pings with
-   `{"action":"ping"}`, which `TripStatusConsumer` rejects as an invalid action — so
-   every 25 seconds the app receives an `{"type":"error", "message":"Invalid
-   action..."}` frame. It works, deliberately, but it means the trip socket carries a
-   steady stream of error frames, and any client logic that surfaces an error frame
-   to the user or reads it as a failure of the last command will misfire. A no-op
-   `ping` action replying `pong` costs three lines and removes the ambiguity.
+2. ~~**Give the keepalive a real action.**~~ **Done server-side in `c2c2b46`.** The
+   driver app pings with `{"action":"ping"}`, which used to be rejected as an invalid
+   action — so every 25 seconds the app received an `{"type":"error"}` frame,
+   indistinguishable from a real command failure by any client that surfaces errors.
+   It now returns `{"type":"pong"}`; verified on the deployed build. The action
+   allow-list is otherwise unchanged, which is asserted. **No app change needed** —
+   the existing ping now gets a clean answer.
 
 ### Remaining follow-ups
 
-- **Observability is the real gap.** Nothing logged when a dispatch loop stalled or
-  a command was lost; the diagnosis took a day because the platform emits no signal
-  for either. Worth adding: a warning when Daphne closes a socket belonging to an
-  active trip, and a counter on `location_frames_coalesced` (now emitted at
-  disconnect).
+- ~~**Observability is the real gap.**~~ **Done in `c2c2b46`.** Nothing logged when
+  a command channel was lost, which is the deepest reason this went undetected: the
+  failure had no server-side symptom at all. `TripStatusConsumer` now logs
+  `trip_command_socket_lost` at WARNING (so it survives production's log level) with
+  the trip id, the participant's role, the trip status and the close code — and stays
+  silent when a ride ends normally, which is asserted, because a warning that fires on
+  every healthy ride is noise. `location_frames_coalesced` is emitted at disconnect.
+  **Had this existed, the original diagnosis would have been one log line.**
 - **`database_sync_to_async` is process-wide single-threaded.** Not the cause here,
   but with N drivers each pinging every 2.5s, every location frame and every
   lifecycle command in the process queue through **one thread**. At 100 concurrent
