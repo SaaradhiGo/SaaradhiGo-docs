@@ -12,7 +12,9 @@
 - **Fixes:** `9701c8c` (dispatch-loop decoupling) and **`8e2ac37`** (the GPS echo —
   this is the one that fixes the reported symptom). Both deployed to QA.
 - **Reproduction suite:** `tests/test_lifecycle_under_gps_load.py`
-- **Verdict: GREEN**, with two client-side requirements recorded below.
+- **Verdict: GREEN.** A ten-minute QA ride with the driver's command socket never
+  drained completes in 3.5s. Two app-side improvements are recommended but not
+  blocking — see §11.
 
 ## Summary
 
