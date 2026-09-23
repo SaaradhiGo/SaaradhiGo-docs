@@ -113,6 +113,17 @@ socket carried the pings. **This needs investigation before pilot** — a real d
 on a 20-minute trip will send far more than 30 pings. It is recorded as a pilot
 blocker, not worked around.
 
+> **Amended 2026-09-23, after investigation.** Twenty was **not** a threshold. A
+> frame-count matrix from 0 to 500 shows flat completion latency with no boundary
+> anywhere, both locally against real infrastructure and in QA. The frame count was
+> a proxy: the real boundary is how fast the *client* drains its socket, because
+> every location frame fans out to the trip group and those broadcasts shared one
+> blocking dispatch loop with the lifecycle commands. That coupling is real, was
+> deterministically reproduced, and is fixed. The specific symptom these two
+> scenarios showed has **not** been reproduced on the current deployment, so the
+> original observation is not yet fully explained. See
+> [pilot-blocker-lifecycle-under-gps-load.md](pilot-blocker-lifecycle-under-gps-load.md).
+
 **A worker restart delays ETA/countdown tasks.** Merging during the rehearsal
 restarted the worker, and `compute_trip_actuals` (a countdown task) did not fire
 until much later — Celery's prefetched ETA tasks return to the queue only after the
