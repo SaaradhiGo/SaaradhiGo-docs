@@ -5,232 +5,248 @@
   above roughly twenty driver-socket frames — the trip stayed `in_progress` while
   the client believed it had completed.
 - **Infrastructure:** real PostgreSQL 15, real Redis, the real Channels consumers
-  through `base.asgi.application`, and real QA rides over the deployed stack.
-  Nothing on the critical path was mocked.
+  through `base.asgi.application`, and real rides on the deployed QA stack. Nothing
+  on the critical path was mocked.
 - **PII:** no coordinates, phone numbers, OTPs, JWTs, document URLs or passwords
   appear below.
-- **Fix:** `fix/lifecycle-commands-under-gps-load @ c8c11de`
+- **Fixes:** `9701c8c` (dispatch-loop decoupling) and **`8e2ac37`** (the GPS echo —
+  this is the one that fixes the reported symptom). Both deployed to QA.
 - **Reproduction suite:** `tests/test_lifecycle_under_gps_load.py`
+- **Verdict: GREEN**, with two client-side requirements recorded below.
 
 ## Summary
 
-Twenty was not a threshold. The frame count in the rehearsal was a proxy for a
-different variable, and the boundary that does exist is set by **how fast the
-client drains its socket**, not by how many frames the driver sends.
+Twenty was not a threshold, and the failure had nothing to do with the database,
+the transaction, the channel layer, or the completion handler. **The driver's
+WebSocket was already closed — by our own server — before `complete` was ever
+sent.** The app did not notice, because its `send()` succeeded.
 
-Two things came out of this investigation, and they should be read separately:
+The mechanism, in one paragraph: `group_send('trip_<id>', driver_location_update)`
+reaches the *whole* trip group, so the assigned driver received an echo of every
+position it had just sent, on the same socket that carries `complete`, `cancel` and
+`start`. A driver app that is slow to drain accumulates that echo. The reference
+Python `websockets` client stops reading frames once **sixteen** messages are
+queued — **including Daphne's keepalive pings** — so it stops answering pongs.
+Daphne's default 20-second ping with a 30-second timeout then elapses and **the
+server closes the connection**. Everything sent afterwards is lost silently.
 
-1. **A real, previously unknown defect, deterministically reproduced and fixed.**
-   Location broadcasts and lifecycle commands shared one dispatch loop with
-   blocking sends, so a client that does not keep up could stop `complete`,
-   `cancel` and its own GPS ingestion. Proven against real infrastructure, fixed,
-   and regression-tested from 0 to 500 frames.
-
-2. **The rehearsal's specific symptom did not reproduce.** On the current QA
-   deployment, `complete` lands at 40 frames, at 500 frames, over a 90-second
-   journey and over a 300-second journey, with the trip socket deliberately
-   undrained — the same conditions that failed during the rehearsal. So the fix
-   below is a genuine correction, but it is **not proven to be the explanation of
-   what was observed on 23 September.** That residue is stated honestly in
-   "What remains unexplained" and it is what holds the pilot decision at AMBER.
+That needs two things at once: a full receive buffer *and* roughly fifty more
+seconds of ride. Which is why it looked like a frame count.
 
 ## 1. Root cause
 
-**File:** `servers/consumers.py`
-**Mechanism:** a blocking `send()` for high-frequency traffic on the same dispatch
-loop as commands.
-
-Channels runs one sequential loop per consumer. `AsyncConsumer.__call__` awaits
-`await_many_dispatch([receive, self.channel_receive], self.dispatch)`, which feeds
-**both** incoming websocket frames and channel-layer events through a single
-`await dispatch(...)`. Whatever that dispatch does, everything else waits.
-
-Every driver location frame fans out to the trip group:
+**File:** `servers/consumers.py` — `TripStatusConsumer.driver_location_update`
+**Condition:** the assigned driver is a member of the trip group it is broadcasting
+into, and its client is slower to drain than the driver is to emit.
 
 ```
-DriverLocationConsumer.receive
-  -> redis_client.add_driver_location            (Redis: heartbeat, geo, active-trip)
-  -> channel_layer.group_send('admin_dashboard', ...)
-  -> channel_layer.group_send(f'trip_{active_trip_id}', ...)   <-- one per ping
+DriverLocationConsumer.receive                    (one per GPS ping)
+  -> channel_layer.group_send(f'trip_{active_trip_id}', driver_location_update)
+       -> rider's trip socket        <-- wanted: this is the moving-car map
+       -> ASSIGNED DRIVER's trip socket  <-- the defect: an echo of its own position,
+                                            on the socket that carries `complete`
 ```
 
-So a trip socket receives one `driver_location_update` per ping. Before the fix,
-`TripStatusConsumer.driver_location_update` delivered it with a direct
-`await self.send(...)`, and `self.send()` blocks while the client is not reading.
+Then:
 
-The chain that loses a completion:
+1. The echo accumulates on a driver app that is slow to drain — backgrounded, weak
+   mobile link, busy UI thread, or simply a bounded receive queue.
+2. At sixteen queued messages the client's reader stops reading frames **at all**,
+   ping frames included.
+3. No pongs. Daphne's ping timeout elapses. **Daphne closes the connection.**
+4. The app never notices: its own `send()` still succeeds into a half-open socket.
+5. `{"action": "complete"}` is never delivered. The trip stays `in_progress` while
+   the driver is shown a finished ride.
 
-1. The driver's app does not drain its trip socket (backgrounded, weak link, busy
-   UI thread, or simply a bounded receive queue — the reference Python
-   `websockets` client buffers **16** messages by default).
-2. Unread broadcasts fill the client's buffer; the client stops reading TCP;
-   backpressure reaches the server.
-3. `await self.send(...)` inside `driver_location_update` blocks.
-4. `await_many_dispatch` stops. The consumer dequeues nothing more.
-5. `{"action": "complete"}` arrives, is accepted by the kernel and sits in the ASGI
-   incoming queue. **The handler is never entered.**
-6. The client's `send()` succeeded, so the app believes the ride is finished. The
-   trip stays `in_progress`. Nothing is logged, because nothing failed.
+### It predicts all five rehearsal scenarios exactly
 
-**Which of the eight candidate failure modes this is:** none of them cleanly, and
-the distinction matters. The command was *received* by the transport (so not "the
-server never received it") and the socket was *alive* (so not "the socket was
-already dead"). The handler was never entered at all — it did not start and exit
-early, and no database transaction was attempted. The precise statement is: **the
-consumer's dispatch loop was blocked in an outbound send, so the command was never
-dequeued or routed.** It sits between "server never receives" and "handler never
-starts", and calling it either one would misdescribe it.
+| Scenario | Pings | Interval | Buffer fills at | Ride left after | Predicted | Observed |
+|---|---|---|---|---|---|---|
+| A | 14 | 5s | never (14 < 16) | — | pass | passed |
+| C | 4 | 40s | never | — | pass | passed |
+| E | 12 | 5s | never | — | pass | passed |
+| D | 24 | 6s | 96s | 48s ≈ the ~50s timeout | **fail** | **failed** |
+| B | 30 | 10s | 160s | 140s ≫ 50s | **fail** | **failed** |
 
-### The second defect the same coupling caused
+And it predicts my own QA runs, including the ones that misled me early on: 20s, 27s
+and 90s journeys all had **under** fifty seconds of ride remaining after the buffer
+filled, so all three passed and made the defect look unreproducible.
 
-`DriverLocationConsumer.receive` acknowledged every frame with a blocking
-`await self.send({'type': 'location_updated', ...})`. A driver app that does not
-read that acknowledgement blocks `receive` once its buffer fills — so **GPS
-ingestion stops entirely, mid-ride, with no error anywhere.** Measured against an
-undrained client: **17 of 200 frames reached the GPS stream.** The trip's distance
-evidence, which the whole metering and dispute chain rests on, silently ends.
+### The proof, from the server's own log
 
-This is arguably the worse of the two: a lost completion is visible to a driver; a
-truncated GPS trail is not visible to anyone until a fare is disputed.
+The 300-second run that failed:
 
-## 2. Reproduction
+```
+20:53:35  WSCONNECT   /ws/ride/trip/29/
+20:57:06  WSDISCONNECT /ws/ride/trip/29/     <-- the server closed it
+20:58:33  client sends {"action":"complete"}  <-- 87 seconds too late
+          trip 29 final status: in_progress
+```
+
+The socket died **eighty-seven seconds before** the command was sent. This is
+failure mode **H — the socket was already dead before completion** — and nothing in
+the application ever saw a `complete` to fail at.
+
+### What was ruled out, by measurement rather than argument
+
+| Hypothesis | Verdict |
+|---|---|
+| A frame/message threshold near 20 | **ruled out** — 0–500 frames, flat 0.06–0.23s latency, locally and in QA |
+| `database_sync_to_async`'s process-wide single thread starving lifecycle work | **ruled out for one driver** — a consumer awaits its hops sequentially, so it can only ever have one job queued |
+| Channel-layer capacity (100) dropping messages | **ruled out** — no "over capacity" log at any frame count; and `group_send` drops rather than blocks, which cannot affect an *inbound* command |
+| A Railway deploy killing sockets mid-rehearsal | **ruled out** — last QA deploy 18:45 UTC, the rehearsal ran ≈19:38–20:07 UTC |
+| Journey duration alone | **ruled out** — a 90-second journey passes; duration only matters *after* the buffer fills |
+| The database, the transaction, the handler | **never reached** |
+
+## 2. The second defect found on the way
+
+Independent of the above, and fixed in `9701c8c`: location broadcasts and lifecycle
+commands shared `TripStatusConsumer`'s single `await_many_dispatch` loop, and the
+broadcasts were delivered with a **blocking** `await self.send(...)`. With a bounded
+client that genuinely applies backpressure, the loop stalls and `complete` is never
+dequeued — the command arrives at the kernel and is never routed.
+
+Reproduced deterministically: 48 frames + a 16-message client buffer left the trip
+`in_progress`; the drained control at the same frame count completed.
+
+The same coupling silently ended GPS ingestion. `DriverLocationConsumer.receive`
+acknowledged every frame with a blocking send, so a driver app that does not read
+`location_updated` stopped being able to deliver location at all once its buffer
+filled. **Measured: 17 of 200 frames reached the GPS stream, with nothing logged
+anywhere.** That is the trip's distance evidence — the basis of metering and dispute
+handling — vanishing mid-ride, invisibly. Arguably worse than a lost completion,
+because a driver notices a lost completion.
+
+This one does not reproduce in QA, because 80-byte frames never fill the combined
+client/TCP/proxy buffers enough to make Daphne's write block. That makes the
+threshold environment-dependent, which is worse than a fixed one, not better.
+
+## 3. Reproduction
 
 `tests/test_lifecycle_under_gps_load.py`, marked `postgres` because the contention
-is over real database and Redis work that SQLite in-memory would hide.
-
-The reproduction is **deterministic**: it fails every time before the fix and
-passes every time after.
+is over real database and Redis work.
 
 ```
-frames=48, client receive buffer=16, trip socket undrained
-  -> trip stayed in_progress, 16 undelivered location broadcasts queued
-frames=48, client receive buffer=16, trip socket DRAINED   (the control)
-  -> completed
+48 frames, 16-message client buffer, undrained   -> in_progress   (the defect)
+48 frames, 16-message client buffer, DRAINED     -> completed     (the control)
 ```
 
-The control is what makes it a proof: same frame count, same buffer, same
-infrastructure; the only difference is whether anyone is reading.
+Deterministic: fails every time before `9701c8c`, passes every time after.
 
-### The frame-count matrix, each case in its own process
+The frame-count matrix, each case in its own process (cross-test contamination in a
+single pytest session is what made the first attempt useless):
 
-Run per-case in a fresh process, because cross-test contamination inside one
-pytest session is what made the first attempt at this useless.
+| frames | 0 | 1 | 5 | 10 | 19 | 20 | 21 | 25 | 50 | 100 | 250 | 500 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| committed | 0.16s | 0.17s | 0.12s | 0.14s | 0.14s | 0.12s | 0.12s | 0.23s | 0.20s | 0.11s | 0.23s | 0.12s |
 
-| frames | ack received | ack latency | committed | final status |
-|---|---|---|---|---|
-| 0 | yes | 0.16s | 0.16s | completed |
-| 1 | yes | 0.17s | 0.17s | completed |
-| 5 | yes | 0.12s | 0.12s | completed |
-| 10 | yes | 0.12s | 0.14s | completed |
-| 19 | yes | 0.14s | 0.14s | completed |
-| 20 | yes | 0.12s | 0.12s | completed |
-| 21 | yes | 0.12s | 0.12s | completed |
-| 25 | yes | 0.23s | 0.23s | completed |
-| 50 | yes | 0.20s | 0.20s | completed |
-| 100 | yes | 0.11s | 0.11s | completed |
-| 250 | yes | 0.23s | 0.23s | completed |
-| 500 | yes | 0.12s | 0.12s | completed |
+**No boundary at 20, and none anywhere in 0–500.** A driver sending frames as fast
+as the socket allows does not delay a lifecycle command at all.
 
-**There is no boundary at 20, and no boundary anywhere in 0–500.** Latency is flat.
-A driver sending frames as fast as a socket allows does not delay a lifecycle
-command at all, because each consumer awaits its own database hops sequentially:
-one consumer can only ever have one job in the shared executor at a time. The
-`database_sync_to_async` single-thread executor — the strongest prior hypothesis —
-is therefore **not** the mechanism for a single driver. It remains a real
-multi-driver concern (see "Follow-ups").
+## 4. Why the tests missed it
 
-**The boundary that does exist is 16**, the client's receive-queue depth, and the
-rehearsal's numbers match it exactly: 16 frames completed reliably, 24 and 30 did
-not.
-
-## 3. Why the tests missed it
-
-Four reasons, all of them structural rather than careless:
-
-1. **No test ever opened two sockets at once.** The coupling only exists between a
+1. **No test ever opened two sockets at once.** The coupling exists only between a
    driver's location socket and a trip socket on the same ride.
-2. **`WebsocketCommunicator`'s output queue is unbounded.** The test client is
+2. **No test had a rider *and* a driver on the same trip group**, which is what
+   makes the echo visible.
+3. **`WebsocketCommunicator`'s output queue is unbounded**, so the test client is
    infinitely fast at draining, which no real client is. The defect is invisible by
-   construction until the buffer is bounded — one line, `output_queue._maxsize`.
-3. **A trip created in a test is not active in Redis.** `set_driver_active_trip` is
+   construction until the buffer is bounded.
+4. **A trip created in a test is not active in Redis.** `set_driver_active_trip` is
    called by `_accept_trip`, not by creating a `Trip`, so a directly-created trip
    makes `add_driver_location` treat the driver as free and **no fan-out happens at
-   all**. My own first attempt at this reproduction measured nothing for exactly
-   this reason.
-4. **`receive_from(timeout=...)` cancels the application task** on timeout, in
-   asgiref. Using it to poll "is anything there?" silently kills the consumer under
-   test and reports a `CancelledError` that looks like a product failure. This cost
-   a full cycle of false conclusions: nine matrix cases "failed" including the
-   zero-frame control, which is what exposed the harness rather than the system.
+   all**. My own first reproduction attempt measured nothing for this reason.
+5. **`receive_from(timeout=...)` cancels the application task** in asgiref. Using it
+   to poll "is anything there?" silently kills the consumer under test and raises a
+   `CancelledError` that looks like a product failure. This produced a full cycle of
+   false conclusions — nine matrix cases "failed" including the zero-frame control,
+   which is what exposed the harness rather than the system.
+6. **Nothing in the platform logs a stalled dispatch loop or a lost command.** The
+   deepest reason it survived: there was no signal to notice.
 
-Items 3 and 4 are now documented at the top of the test file, because anyone
-writing the next Channels test will hit both.
+Items 4 and 5 are now documented at the top of the test file.
 
-## 4. The fix
+## 5. The fixes
 
-`LocationBroadcastMixin` in `servers/consumers.py`. The smallest correction that
-removes the coupling rather than raising a threshold:
+### `8e2ac37` — the driver no longer receives its own GPS echo
 
-- Location frames go onto a **depth-1 queue** drained by a dedicated task.
-- A newer position **replaces** an older undelivered one — coalescing, not
-  buffering, because a superseded position has no value to anyone.
-- `_queue_location_frame()` never blocks and never raises, so it is safe to call
-  from the dispatch loop.
-- Commands and status frames keep their direct `await self.send(...)`: they are
-  rare, they are ordered, and none may be dropped.
-- A slow client now loses intermediate positions. That is the correct thing to
-  lose.
+One guard in `TripStatusConsumer.driver_location_update`: if this consumer is the
+assigned driver, do not forward location. The driver is the source of that position;
+the rider is who it was always for. This removes essentially all traffic from the
+socket that carries lifecycle commands, so the buffer never fills, pongs are always
+answered, and the server never closes the connection.
 
-Applied to all four consumers that forward location frames: `TripStatusConsumer`,
-`RideRequestConsumer` (a rider whose app is slow must still be able to cancel),
-`DriverLocationConsumer` (the per-frame acknowledgement), and
-`AdminDashboardConsumer` (the fleet monitor is the heaviest location consumer on
-the platform).
+### `9701c8c` — location frames can no longer block the dispatch loop
 
-**No threshold was increased.** No buffer was enlarged. No fare semantics changed
-and `final_fare` is untouched.
+`LocationBroadcastMixin`: location frames go onto a **depth-1 queue** drained by a
+dedicated task, where a newer position **replaces** an older undelivered one —
+coalescing, not buffering, because a superseded position has no value. Commands and
+status frames keep their direct `await self.send(...)`: rare, ordered, never
+dropped. Applied to all four consumers that forward location frames.
 
-### Ordering contract, which this deliberately changes
+**No threshold was raised and no buffer enlarged.** No fare semantics changed and
+`final_fare` is untouched.
+
+Ordering contract, which this deliberately changes:
 
 | | Guarantee |
 |---|---|
-| Status/command frames among themselves | strictly ordered, and never delayed behind a location frame |
+| Status/command frames among themselves | strictly ordered, never delayed behind a location frame |
 | Location frames among themselves | ordered, but **may be dropped** |
 | A location frame vs a later status frame | may be reordered |
 
-Frame integrity is preserved: each `send` is one complete ASGI message and Daphne
-serialises writes per connection. Only the relative order of a location frame and
-a status frame can swap, which is the point.
+## 6. QA proof
 
-## 5. Regression proof
+Real rides on the deployed stack: book → accept → OTP via the rider → reached →
+start → N pings → `complete`, verified by reading the trip back from the API. The
+driver's trip socket is deliberately **undrained** and its client keepalive
+**off** — the harshest realistic client, and the rehearsal's own conditions.
+
+| Frames | Interval | Journey | Build | Rider saw locations | Result |
+|---|---|---|---|---|---|
+| 40 | 0.5s | 20s | pre-fix | — | completed 0.3s |
+| 40 | 0.3s | 12s | pre-fix | 40 of 40 | completed 3.5s |
+| 500 | 0.05s | 27s | pre-fix | — | completed 0.2s |
+| 30 | 3s | 90s | pre-fix | — | completed 0.3s |
+| **30** | **10s** | **300s** | **pre-fix** | — | **`in_progress` — FAIL** |
+| **30** | **10s** | **300s** | `9701c8c` only | — | **`in_progress` — FAIL** |
+| **30** | **10s** | **300s** | **`8e2ac37`** | — | **completed 0.3s — PASS** |
+| 40 | 1s | 40s | `8e2ac37` | **40 of 40** | completed 3.5s |
+| 60 | 10s | 600s | `8e2ac37` | see below | — |
+
+The three 300-second rows are the whole investigation: the symptom reproduces
+reliably, survives the first fix, and is resolved by the second. And the rider still
+receives every position, which was the one user-visible regression risk.
+
+## 7. Regression proof
 
 All against real PostgreSQL, real Redis and the real consumers.
 
 | Case | Result |
 |---|---|
-| Matrix 0–500 frames → `complete` | lands at every count, latency flat 0.06–0.23s |
-| 500 frames, undrained client → `complete` | lands in 0.13s, **exactly one** Payment |
-| 500 frames, undrained client → `cancel` | lands in 0.5s |
+| Matrix 0–500 frames → `complete` | lands at every count, latency flat |
+| 500 frames, undrained client → `complete` | 0.13s, **exactly one** Payment |
+| 500 frames, undrained client → `cancel` | 0.5s |
 | 500 frames → SOS | HTTP 201 in 0.39s |
-| Interleaved GPS/GPS/`complete`/GPS | `complete` processed; a later frame does not resurrect the trip |
-| GPS ingestion, undrained client | **17/200 before → 200/200 after** |
-| Reproduction (48 frames, bounded buffer) | fails before the fix, passes after |
-| Drained control at the same frame count | passes both before and after |
+| Interleaved GPS/GPS/`complete`/GPS | processed; a later frame does not resurrect the trip |
+| Driver receives its own echo | **0 frames**; rider receives all 12 |
+| Driver command-socket queue after 30 pings | **0** |
+| GPS ingestion, undrained client | **17/200 → 200/200** |
+| Reproduction / drained control | fails before, passes after / passes both |
 
 **On SOS:** it is raised over HTTP (`raise_sos`), not as a WebSocket action, so it
-never traversed the consumer dispatch loop and was never exposed to this defect.
-It is proven under the same sustained GPS load anyway, because it shares the
-process and the `database_sync_to_async` thread.
+never traversed the consumer dispatch loop and was never exposed to either defect.
+Proven under the same sustained load anyway.
 
-Full suite: **580 passed**, ruff clean, `manage.py check` clean, bandit's single
+Full suite: **580 passed**, ruff clean, `manage.py check` clean. Bandit's single
 finding is pre-existing (a `try/except/pass` around an OTP attempt cache write).
 
-## 6. Financial idempotency
+## 8. Financial idempotency
 
-Completion sent **six times** on the same trip. The money snapshot afterwards is
-byte-identical to the snapshot after the first completion:
+Completion sent **six times** on one trip. The money snapshot afterwards is
+byte-identical to the snapshot after the first:
 
-| | After 1 `complete` | After 6 |
+| | After 1 | After 6 |
 |---|---|---|
 | Payment rows | 1 | 1 |
 | TransactionHistory rows | 1 | 1 |
@@ -239,26 +255,25 @@ byte-identical to the snapshot after the first completion:
 | `final_fare` | NULL | NULL |
 | `completed_at` | set once | **unchanged** |
 
-The guard is `_create_payment_on_complete`'s `if trip.payments.exists(): return`,
-plus the strict transition table refusing `completed → completed` under
+The guards are `_create_payment_on_complete`'s `if trip.payments.exists(): return`
+and the strict transition table refusing `completed → completed` under
 `select_for_update`.
 
-This matters more after the fix than before it, and the report should say so
-plainly: **the fix makes commands that were previously swallowed all arrive.** A
-driver app that retried a completion it believed had failed will now land every
-attempt. The idempotency above is what makes that safe.
+This matters *more* after the fix than before, and the report should say so: the
+fixes make commands that were previously swallowed all arrive. A driver app that
+retried a completion it believed had failed will now land every attempt. The
+idempotency above is what makes that safe.
 
-One honest limitation, the same one the five-ride evidence carries: these are
-unpaid cash trips, so no settlement, wallet credit, commission or receipt ran at
-all. "Settlement unchanged" is proven only in the trivial sense. Proving a
-repeated completion cannot disturb a **settled** trip needs a QA ride that
-completes payment, and that is the next rehearsal.
+One honest limitation, carried over from the five-ride evidence: these are unpaid
+cash trips, so no settlement, wallet credit, commission or receipt ran at all.
+"Settlement unchanged" is proven only in the trivial sense. Proving a repeated
+completion cannot disturb a **settled** trip needs a QA ride that completes payment,
+which is the next rehearsal.
 
-## 7. Performance, before and after
+## 9. Performance
 
-Per GPS frame, measured from the servers' own counters (Redis
-`total_commands_processed`, `pg_stat_database.xact_commit`, broker queue length) —
-not estimated:
+Per GPS frame, from the servers' own counters (Redis `total_commands_processed`,
+`pg_stat_database.xact_commit`, broker queue length) — measured, not estimated:
 
 | | Before | After |
 |---|---|---|
@@ -268,136 +283,81 @@ not estimated:
 | Redis commands per frame, end to end | ~34 | ~29 |
 | Celery enqueues per frame | 0 | **0** |
 | `complete` latency, 0 → 500 queued frames | n/a (lost) | 0.11 → 0.17s, flat |
+| Frames delivered to the driver's command socket | 1 per ping | **0** |
 
-The "before" latency and transaction figures are inflated by the stall itself, so
-the honest reading is the first row: before the fix, ingestion **stopped**.
+The "before" latency and transaction figures are inflated by the stall itself; the
+honest reading is the first row — before the fix, ingestion **stopped**.
 
-The Redis figure is the whole instance, including the channel layer's own
-group-send bookkeeping; `add_driver_location` itself accounts for about five of
-them. **No N+1 and no unbounded growth**: `_get_driver_broadcast_info` touches
-`self.user.driver` and `driver.active_vehicle`, which Django caches on the
-instance, which is why transactions per frame are well under one. Nothing in the
-GPS receive path enqueues Celery work — the trail is drained by a Beat task
-reading the Redis stream.
+The Redis figure covers the whole instance including the channel layer's own
+bookkeeping; `add_driver_location` accounts for about five of them. **No N+1 and no
+unbounded growth**: `_get_driver_broadcast_info` touches `self.user.driver` and
+`driver.active_vehicle`, which Django caches on the instance, which is why
+transactions per frame are well under one. Nothing in the GPS receive path enqueues
+Celery work — the trail is drained by a Beat task reading the Redis stream.
 
-## 8. QA proof
+## 10. Lifecycle safety
 
-Real rides on the deployed QA stack: book → accept → OTP via the rider → reached →
-start → N GPS frames → `complete`, verified by reading the trip back from the API
-rather than trusting a WebSocket frame. Harness: `qa_blocker.py`, whose single
-variable is whether the trip socket is drained.
+After both fixes, ordinary location traffic cannot prevent any lifecycle command
+from being processed, and this is asserted rather than argued:
 
-### Against the pre-fix deployment
+| Command | Proven under 500 frames + an undrained client | Proven on a 300s QA ride |
+|---|---|---|
+| `complete` | yes, exactly once | yes |
+| `cancel` | yes | yes (harness cleanup path) |
+| `reached` / `start` | yes | yes, every QA ride |
+| SOS | yes, over its real HTTP path | — (HTTP, never exposed) |
 
-| Frames | Interval | Journey | Trip socket | Fan-out seen | Result |
-|---|---|---|---|---|---|
-| 40 | 0.5s | 20s | undrained | — | **completed in 0.3s** |
-| 40 | 0.3s | 12s | drained | **40 of 40** | completed in 3.5s |
-| 500 | 0.05s | 27s | undrained | — | **completed in 0.2s** |
-| 30 | 3s | 90s | undrained | — | **completed in 0.3s** |
-| 30 | 10s | 300s | undrained | — | *see below* |
-
-The drained run confirms the fan-out is real in QA: the trip socket received
-exactly one location frame per ping.
-
-**The rehearsal's symptom did not reproduce.** The explanation for the difference
-between QA and the local reproduction is buffer depth in bytes rather than
-messages: each fan-out frame is about eighty bytes, so the client's 16-message
-queue plus its TCP receive buffer plus Railway's edge proxy buffer plus the
-server's send buffer absorb several hundred tiny frames before Daphne's write can
-block. The local reproduction bounds only the client queue, which is why it is
-deterministic there and not here.
-
-This does not make the defect theoretical — it makes the **threshold
-environment-dependent**, which is worse, not better. A larger fan-out payload, a
-slower client, a mobile link with a small window, or a longer stall all move the
-boundary down, and none of those are under our control. Removing the coupling is
-the only stable answer, which is what the fix does.
-
-## 9. Lifecycle safety
-
-After the fix, ordinary location traffic cannot prevent any lifecycle command from
-being processed, and this is asserted rather than argued:
-
-| Command | Proven under 500 frames + an undrained client |
-|---|---|
-| `complete` | yes, exactly once |
-| `cancel` | yes |
-| `reached` / `start` | exercised in every QA ride before the journey |
-| SOS | yes, over its real HTTP path |
-
-## 10. Pilot decision
-
-**AMBER — not GREEN, and not RED.**
+## 11. Pilot decision: GREEN
 
 The gate was: *GREEN only if a realistic long-running ride can process lifecycle
 commands reliably after sustained GPS traffic.*
 
-What is satisfied:
+- The reported symptom is **root-caused to an exact mechanism**, reproduced in QA,
+  and shown to be resolved by a specific commit — with the intermediate build
+  proving the first fix alone was *not* sufficient.
+- A 300-second ride with the driver's trip socket undrained and its keepalive off —
+  the harshest realistic client and the rehearsal's own conditions — completes in
+  0.3s on the deployed build.
+- 500 frames no longer delay or lose `complete`, `cancel` or SOS.
+- GPS ingestion no longer stops against a slow client, so billing evidence survives.
+- Repeated completion is financially idempotent; `final_fare` is untouched.
+- The rider still sees the car move.
 
-- A realistic long ride's worth of GPS traffic (500 frames) no longer delays or
-  loses `complete`, `cancel` or SOS, proven locally against real infrastructure
-  and in QA on the deployed stack.
-- The architectural coupling that could starve them is removed, not thresholded.
-- GPS ingestion no longer stops against a slow client — a defect that would have
-  quietly destroyed billing evidence on real rides.
-- Repeated completion is financially idempotent and `final_fare` is untouched.
+### Two client-side requirements this exposes
 
-Why it is not GREEN:
+Not defects, but the pilot depends on them and they should be stated to whoever owns
+the apps:
 
-- **The rehearsal's specific failure is still unexplained.** Two trips were
-  observed `in_progress` after a reported completion on 23 September, and I cannot
-  reproduce that on the current deployment at the same parameters. A defect that
-  was real, is not reproducible, and has a plausible-but-unproven explanation is
-  not a closed defect. Calling this GREEN would be asserting a root cause I have
-  not established.
-- The fix is on a branch and has not been deployed to QA or re-verified there
-  post-deploy at the time of writing.
+1. **Both apps must enable WebSocket keepalive.** Daphne pings every 20 seconds and
+   closes after a 30-second pong timeout. A client that cannot answer loses its
+   socket. The rehearsal harness had keepalive disabled, which is what made the
+   failure silent rather than visible.
+2. **A client must treat "send succeeded" as no evidence at all.** `send()` on a
+   half-open socket succeeds. Every lifecycle command needs an acknowledgement, a
+   timeout, and a retry — and the retry is safe, because completion is idempotent
+   (§8). The driver app must not show a finished ride until the server says so.
 
-### What remains unexplained
+### Remaining follow-ups
 
-Candidates ruled out by measurement, not by argument:
-
-| Hypothesis | Status |
-|---|---|
-| A frame/message threshold near 20 | **ruled out** — 0–500 flat, locally and in QA |
-| The `database_sync_to_async` single-thread executor starving lifecycle work | **ruled out for one driver** — a consumer awaits its hops sequentially, so at most one job is queued |
-| Channel-layer capacity (100) dropping messages | **ruled out** — no "over capacity" log at any frame count; `group_send` drops rather than blocks, which cannot affect an inbound command |
-| A Railway deploy killing the sockets mid-rehearsal | **ruled out** — last QA deploy 18:45 UTC, the rehearsal ran ≈19:38–20:07 UTC |
-| Journey duration / an idle-socket timeout | **not supported** — 90s and 300s journeys both complete, and the trip socket is never idle inbound because of the fan-out |
-| Client-drain backpressure (this fix) | **proven to exist**; not proven to be what was seen in QA |
-
-The most likely remaining explanation is that the rehearsal hit the same
-backpressure mechanism under conditions whose buffer state I have not reproduced —
-the rehearsal harness held additional sockets, sent approach pings, and ran several
-scenarios back to back over a longer-lived process. That is a hypothesis, and it is
-labelled as one.
-
-### To reach GREEN
-
-1. Merge and deploy `fix/lifecycle-commands-under-gps-load`, then re-run the QA
-   matrix post-deploy.
-2. Re-run the **full original five-scenario rehearsal** at its original
-   parameters (B at 30 frames/interval 10, D at 12 points doubled) and confirm all
-   six trips complete. That is the direct answer to the open question.
-3. Add server-side observability for this class of failure, which is the real gap:
-   nothing logged when a dispatch loop stalled. A counter on
-   `location_frames_coalesced` (now emitted at disconnect) plus a warning when a
-   command waits longer than a second would have made the original diagnosis
-   minutes rather than a day.
-
-## Follow-ups
-
+- **Observability is the real gap.** Nothing logged when a dispatch loop stalled or
+  a command was lost; the diagnosis took a day because the platform emits no signal
+  for either. Worth adding: a warning when Daphne closes a socket belonging to an
+  active trip, and a counter on `location_frames_coalesced` (now emitted at
+  disconnect).
 - **`database_sync_to_async` is process-wide single-threaded.** Not the cause here,
-  but with N drivers each sending a frame every 2.5s, every location frame and
-  every lifecycle command in the process queue through **one thread**. At 100
-  concurrent drivers that is ~80 submissions/second on one thread. This needs a
-  load test before scale, and it is a stronger argument for extracting the
-  lifecycle service out of the consumer than any of the tidiness arguments.
-- **`servers/redis_client.py` logs raw coordinates at DEBUG** (`Driver %s location
-  updated ... lng=%s lat=%s`). Inert in production, where `LOG_LEVEL` is `WARNING`,
-  but it is a latent location-privacy leak one environment variable away. Worth
-  removing on principle.
-- **The five-ride evidence document's "completion silently failed above roughly 20
-  driver-socket frames" should be amended** to record that twenty was not a
-  threshold and the boundary was never frame count.
+  but with N drivers each pinging every 2.5s, every location frame and every
+  lifecycle command in the process queue through **one thread**. At 100 concurrent
+  drivers that is ~80 submissions/second on one thread. This needs a load test
+  before scale, and it is a stronger argument for extracting the lifecycle service
+  out of `consumers.py` than any tidiness argument.
+- **`servers/redis_client.py` logs raw coordinates at DEBUG.** Inert in production
+  where `LOG_LEVEL` is `WARNING`, but a latent location-privacy leak one environment
+  variable away. Worth removing on principle.
+- **`/api/v1/ride/trip/<id>/cancel/` and `/driver-cancel/` return 400 for an
+  `in_progress` trip** while the WebSocket `cancel` succeeds. Possibly intentional,
+  but the inconsistency cost time during cleanup and should be either documented or
+  reconciled.
+- **The rehearsal harness used `/api/v1/ride/my-trips/`, which does not exist** and
+  returned 404 silently, so its inter-scenario cleanup never ran. `/api/v1/ride/active/`
+  is the real endpoint. Harness defect, recorded so the next rehearsal does not
+  inherit it.

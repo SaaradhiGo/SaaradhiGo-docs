@@ -113,15 +113,19 @@ socket carried the pings. **This needs investigation before pilot** — a real d
 on a 20-minute trip will send far more than 30 pings. It is recorded as a pilot
 blocker, not worked around.
 
-> **Amended 2026-09-23, after investigation.** Twenty was **not** a threshold. A
-> frame-count matrix from 0 to 500 shows flat completion latency with no boundary
-> anywhere, both locally against real infrastructure and in QA. The frame count was
-> a proxy: the real boundary is how fast the *client* drains its socket, because
-> every location frame fans out to the trip group and those broadcasts shared one
-> blocking dispatch loop with the lifecycle commands. That coupling is real, was
-> deterministically reproduced, and is fixed. The specific symptom these two
-> scenarios showed has **not** been reproduced on the current deployment, so the
-> original observation is not yet fully explained. See
+> **Amended 2026-09-23, after investigation — root cause found.** Twenty was **not**
+> a threshold; a matrix from 0 to 500 frames shows flat completion latency with no
+> boundary anywhere. The real cause: `group_send('trip_<id>', ...)` reached the whole
+> trip group, so the driver received an echo of its own GPS on the socket carrying
+> `complete`. The `websockets` client stops reading frames at 16 queued messages —
+> **including Daphne's keepalive pings** — so it stopped answering pongs and
+> **Daphne closed the connection**. `complete` then went into a dead socket while
+> `send()` still succeeded. It needs a full buffer *and* ~50 more seconds of ride,
+> which predicts these five scenarios exactly: A (14 pings), C (4) and E (12) never
+> reach 16 and passed; D (24 at 6s) and B (30 at 10s) do, with 48s and 140s of ride
+> left, and both failed. Confirmed in QA: the server logged `WSDISCONNECT` 87 seconds
+> **before** `complete` was sent. Fixed in `8e2ac37`; a 300-second undrained ride now
+> completes in 0.3s. See
 > [pilot-blocker-lifecycle-under-gps-load.md](pilot-blocker-lifecycle-under-gps-load.md).
 
 **A worker restart delays ETA/countdown tasks.** Merging during the rehearsal
