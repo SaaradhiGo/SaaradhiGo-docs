@@ -212,11 +212,21 @@ driver's trip socket is deliberately **undrained** and its client keepalive
 | **30** | **10s** | **300s** | `9701c8c` only | — | **`in_progress` — FAIL** |
 | **30** | **10s** | **300s** | **`8e2ac37`** | — | **completed 0.3s — PASS** |
 | 40 | 1s | 40s | `8e2ac37` | **40 of 40** | completed 3.5s |
-| 60 | 10s | 600s | `8e2ac37` | see below | — |
+| **60** | **10s** | **600s** | **`8e2ac37`** | **60 of 60** | **completed 3.5s — PASS** |
 
 The three 300-second rows are the whole investigation: the symptom reproduces
 reliably, survives the first fix, and is resolved by the second. And the rider still
 receives every position, which was the one user-visible regression risk.
+
+The last row is the pilot case: **a ten-minute ride, sixty pings, the driver's
+command socket never drained and its keepalive off — completed in 3.5 seconds, with
+all sixty positions delivered to the rider.** That is the same shape of ride that
+failed at half the length before the fix.
+
+One methodology note, since it cost a run: a push to `dev` deploys QA and restarts
+the container, which kills every open WebSocket. A first attempt at this ten-minute
+ride was invalidated that way by an unrelated docs commit. Long QA rehearsals need a
+deployment freeze for their duration.
 
 ## 7. Regression proof
 
@@ -292,8 +302,24 @@ The Redis figure covers the whole instance including the channel layer's own
 bookkeeping; `add_driver_location` accounts for about five of them. **No N+1 and no
 unbounded growth**: `_get_driver_broadcast_info` touches `self.user.driver` and
 `driver.active_vehicle`, which Django caches on the instance, which is why
-transactions per frame are well under one. Nothing in the GPS receive path enqueues
-Celery work — the trail is drained by a Beat task reading the Redis stream.
+transactions per frame are well under one.
+
+### Exactly what runs in the GPS receive path
+
+Enumerated from `DriverLocationConsumer.receive`, because "what is on the hot path"
+was the question behind the backpressure test:
+
+| | In the receive path? |
+|---|---|
+| Synchronous DB work | **yes**, 2 `@database_sync_to_async` hops — but ~0.16 transactions/frame, because Django caches the related objects on the instance after the first frame |
+| Redis calls | **yes**, ~5 in `add_driver_location` (heartbeat setex, vehicle-type read, geo add/rem, active-trip read) |
+| GPS stream write | **yes**, one XADD to `driver_location_stream` (maxlen 100 000) |
+| Channel-layer sends | **yes**, 2 `group_send` — `admin_dashboard` and `trip_<id>` |
+| Send to own socket | **yes**, one acknowledgement — now queued and coalescing, not blocking |
+| FCM / push | **no** |
+| Celery enqueue | **no** — the trail is drained by a Beat task reading the Redis stream |
+| Notification rows | **no** |
+| Fare or distance calculation | **no** — actuals are computed post-completion by a countdown task |
 
 ## 10. Lifecycle safety
 
@@ -315,27 +341,53 @@ commands reliably after sustained GPS traffic.*
 - The reported symptom is **root-caused to an exact mechanism**, reproduced in QA,
   and shown to be resolved by a specific commit — with the intermediate build
   proving the first fix alone was *not* sufficient.
-- A 300-second ride with the driver's trip socket undrained and its keepalive off —
-  the harshest realistic client and the rehearsal's own conditions — completes in
-  0.3s on the deployed build.
+- A **ten-minute** ride with the driver's trip socket undrained and its keepalive
+  off — a harsher client than either real app — completes in 3.5s on the deployed
+  build, as does the 300-second case that reproduced the failure.
 - 500 frames no longer delay or lose `complete`, `cancel` or SOS.
 - GPS ingestion no longer stops against a slow client, so billing evidence survives.
 - Repeated completion is financially idempotent; `final_fare` is untouched.
 - The rider still sees the car move.
 
-### Two client-side requirements this exposes
+### How exposed were the real apps? Less than the rehearsal suggested
 
-Not defects, but the pilot depends on them and they should be stated to whoever owns
-the apps:
+Checked rather than assumed, because it changes how urgent this was:
 
-1. **Both apps must enable WebSocket keepalive.** Daphne pings every 20 seconds and
-   closes after a 30-second pong timeout. A client that cannot answer loses its
-   socket. The rehearsal harness had keepalive disabled, which is what made the
-   failure silent rather than visible.
-2. **A client must treat "send succeeded" as no evidence at all.** `send()` on a
-   half-open socket succeeds. Every lifecycle command needs an acknowledgement, a
-   timeout, and a retry — and the retry is safe, because completion is idempotent
-   (§8). The driver app must not show a finished ride until the server says so.
+| | Driver app | Rider app |
+|---|---|---|
+| Drains its socket | **yes** — `channel.stream.listen(...)`, an unbounded Dart stream | **yes**, on both the ride and trip channels |
+| Keepalive | **yes** — an app-level `{"action":"ping"}` every 25s | none of its own; relies on the protocol-level pong `dart:io` sends automatically |
+| Consumes the driver-location echo | `location_updated` only | `driver_location_update` — it needs it |
+
+So neither app has the bounded 16-message receive queue that killed the QA harness;
+a Dart `StreamSubscription` has no such cap. **The rehearsal's exact trigger was
+harness-specific.** Real exposure needs the app to stop draining entirely — an
+isolate suspended by iOS or Android when the app is backgrounded or the screen
+locks — for long enough to fill the OS socket buffer, which at eighty bytes a frame
+is thousands of frames, *and* ~50 more seconds of ride.
+
+That makes the real-world probability much lower than the rehearsal implied, and it
+should be said plainly. It does not make either fix wrong: the echo was pointless
+traffic on the socket carrying `complete`, backgrounding is an ordinary thing a
+driver's phone does, and the GPS-ingestion stall (§2) has no client-side mitigation
+at all.
+
+### Two things the apps should still change
+
+1. **Treat "send succeeded" as no evidence.** `send()` on a half-open socket
+   succeeds — that is precisely why the rehearsal reported completed rides that had
+   not completed. Every lifecycle command needs an acknowledgement, a timeout and a
+   retry, and the retry is safe because completion is idempotent (§8). The driver app
+   must not show a finished ride until the server says so. **This is the one that
+   would have turned a silent data-integrity failure into a visible, recoverable
+   one**, and it is worth more than either server fix.
+2. **Give the keepalive a real action.** The driver app pings with
+   `{"action":"ping"}`, which `TripStatusConsumer` rejects as an invalid action — so
+   every 25 seconds the app receives an `{"type":"error", "message":"Invalid
+   action..."}` frame. It works, deliberately, but it means the trip socket carries a
+   steady stream of error frames, and any client logic that surfaces an error frame
+   to the user or reads it as a failure of the last command will misfire. A no-op
+   `ping` action replying `pong` costs three lines and removes the ambiguity.
 
 ### Remaining follow-ups
 
