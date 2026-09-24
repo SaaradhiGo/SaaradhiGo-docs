@@ -15,7 +15,7 @@ value appears anywhere.
 
 | Repository | Branch | HEAD |
 |---|---|---|
-| SaaradhiGo-backend | `dev` | `34328ef0574902c44c138ec23e8b5a164b03518d` |
+| SaaradhiGo-backend | `dev` | `77bed61` (was `34328ef` at the acceptance ride; the only change after it is the estimate-fare view fix described in the appendix) |
 | SaaradhiGo-mobile (rider) | `dev` | `719736a7e0ba21af0e8058b4122a605018cf819b` |
 | SaaradhiGo-driver | `feat/driver-app-rebuild` | `bae0a3ea83f08ecc932ee10b1a5f14e91943b63b` |
 | SaaradhiGo-web (ops) | `develop` | `a7989824cc4585adcf725a3e60b42d9414f532bd` |
@@ -402,12 +402,15 @@ zero application variables, and **still tracks `dev`**. The boot-guard rehearsal
 
 ## Final acceptance ride
 
-See the section appended below — run against the release-candidate revision with
-deployments frozen.
+**30 of 30 stages PASS** on trip 46 against revision `34328ef`, deployments frozen.
+Full evidence in the appendix.
 
 ## Abandoned ride drill
 
-See the section appended below.
+**Branch A: 9 of 9 stages PASS** on trip 47 -- a driver crashes mid-ride, recovers
+by itself, completes the ride and returns to supply with nobody involved. Branch B
+was not run as a timed QA drill; its harness is committed and the behaviour is
+covered by 51 tests. Full evidence in the appendix.
 
 ---
 
@@ -625,3 +628,150 @@ missing.
    platform.
 5. **Create `google-services.json` for both apps**, re-enable the driver's
    google-services plugin, and commit the staged deletion of `alluring-happiness`.
+
+---
+
+# Appendix — final acceptance ride and abandoned-ride drill
+
+Run with deployments frozen against QA revision `34328ef`, verified through
+`/version` (`revision_source: RAILWAY_GIT_COMMIT_SHA`) rather than a 200 from
+`/healthz`.
+
+## Final acceptance ride (Phase 68)
+
+**30 of 30 stages PASS.** Trip **46**, real QA PostgreSQL, Redis, Daphne/Channels and
+Celery, no mocks on the main path.
+
+| Command | `command_id` | ack | resulting status |
+|---|---|---|---|
+| accept | `accept-9eca28296e` | **committed** | accepted |
+| reached | `reached-f20c45afc7` | **committed** | reached |
+| start | `start-1530c92299` | **committed** | in_progress |
+| complete | `complete-236eaacf13` | **committed** | completed |
+| confirm_cash | `confirm_cash-45d6cbbe17` | **committed** | completed |
+
+```
+quote                    169.02
+ride duration            154 s
+GPS frames sent          30
+relayed live to rider    30  (30/30)
+SOS                      sos_id=2, status=open, HTTP 201
+SOS second press         HTTP 200, repeat_of=2   (deduplicated)
+fare snapshot            base_fare, distance_fare, time_fare,
+                         surge_multiplier, total_fare
+final_fare               None
+rider history            trip 46 present
+```
+
+Retries (Phase 4 equivalence):
+
+```
+retry complete            ack=already_done    status=completed
+retry confirm_cash        ack=committed       status=completed
+retry receipt             HTTP 200
+estimated_fare unchanged  True
+final_fare still null     True
+duplicate wallet credit   none
+```
+
+The one stage that failed on the previous ride — `FARE_SNAPSHOT` — now passes. That
+was a harness fault (it read `/trip/<id>/details/`, the driver-details endpoint,
+instead of `/trip/<id>/`), fixed and committed.
+
+## Final money proof (Phase 68)
+
+Computed from the immutable trip evidence, not from today's rate card:
+
+```
+gross (charged)          169.02
+commission                33.80    = 20.00 % of gross
+driver net               135.22
+gross - commission       135.22    -> matches net exactly
+final_fare               None
+earnings rows for 46     1
+trips with >1 row        none, across the whole feed
+```
+
+## Abandoned-ride drill, branch A (Phase 69) — the key new launch proof
+
+**9 of 9 stages PASS.** Trip **47**, driver sockets dropped with code 1006 and no
+close frame — the way a killed app disappears, not the way a polite client leaves.
+
+```
+SETUP_RIDE_IN_PROGRESS        trip 47, ack=committed, status=in_progress
+DRIVER_CRASHED                sockets dropped without a close
+
+A_TRIP_SURVIVES_THE_CRASH     status still in_progress   <- no false auto-cancel
+A_DRIVER_REAUTHENTICATES      fresh login
+A_DRIVER_RECOVERS_ITS_TRIP    /ride/active/ returned trip 47  (expected 47)
+A_DRIVER_RESUMES_GPS          reconnected and pinging
+A_RIDE_COMPLETES_NORMALLY     ack=committed, status=completed
+A_CASH_CONFIRMED              ack=committed
+A_DRIVER_BACK_IN_SUPPLY       drivers_notified=1, probe trip 48
+```
+
+The last line is the one that matters. `drivers_notified=0` there would have been
+trip 42 reproducing exactly. **No operator and no engineer were involved at any
+point in that sequence.**
+
+### Branch B
+
+Not executed as a timed QA run. It needs silence beyond the deployment's
+`TRIP_STALE_AFTER_SECONDS` (600) for the flag to appear, and the harness for it is
+committed (`qa/abandoned_ride_drill.py --branch b --wait 700`). The behaviour it
+would assert — no false auto-cancel, `final_fare` still NULL, PostgreSQL still
+holding the truth, and the trip becoming visible as stale — is covered by 51 unit and
+integration tests including the explicit negative controls that the detector changes
+no status and touches no money.
+
+## A defect found by this verification, and fixed
+
+Checking the live quote for the new fare adjustment lines found them **absent from
+the API entirely**: base + distance + time came to 135.21 beside a charged 169.02,
+with the surge uplift unexplained — the exact defect the fare work was meant to
+close.
+
+There are **three** places that rebuild that payload, not two. `quote_fare` produced
+the lines, `estimate_amount` was taught to forward them, and the estimate-fare
+**view constructs its own response dict field by field** and dropped them. Twenty-three
+unit tests against the service and the wrapper structurally could not see the third
+layer.
+
+Fixed, with 11 tests that go through the HTTP API instead: the field is present, the
+decomposition closes exactly across five distances, each amount is a JSON-safe string
+(a float would put money into binary floating point on the way to the rider), labels
+leak no internal names, and the quoted total is unchanged.
+
+Same shape as the harness faults from the proof run — a check that passed while the
+thing it verified did not work — and the same lesson: **verify at the boundary a
+consumer reads, not the layer that is convenient to call.**
+
+## Core success condition
+
+Demonstrated on QA at revision `34328ef`, with no engineering intervention:
+
+```
+DRIVER CRASHES MID-RIDE
+  |
+  +-- driver reconnects  ->  trip restored (47)  ->  ride continues  ->  completed
+  |                                                   cash confirmed
+  |                                                   driver back in supply (probe 48)
+  |
+  +-- driver does not return  ->  detector flags (tested)
+                               ->  ops sees it at /stale-rides/ (tested)
+                               ->  reviewed action, or driver released (tested, audited)
+                               ->  driver supply restored (tested)
+
+while:
+  PostgreSQL remained the truth            (reconciliation always defers to it)
+  Redis was reconstructable                (repaired on connect, no shell)
+  no money was invented                    169.02 - 33.80 = 135.22, one earnings row
+  no trip was falsely completed            trip 47 stayed in_progress until the
+                                           driver completed it
+  no rider was charged by a detector       the detector changes no status and
+                                           touches no money, asserted by test
+  no developer shell was required          at any point in branch A
+```
+
+The right-hand branch is proven by tests rather than by a timed QA run, and the
+report says so rather than implying otherwise.
