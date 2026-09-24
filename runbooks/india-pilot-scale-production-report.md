@@ -1,9 +1,9 @@
 # India pilot — scale and production readiness report
 
 **Run scope:** OPERATE → SECURE → NOTIFY → LOAD → FAIL → RECOVER → PREPARE PRODUCTION
-**Backend revision at end of run:** `8181e2c` on `dev`
+**Backend revision at end of run:** `5a5270f` on `dev`
 **QA deployment verified through:** `GET /version` (`revision_source: RAILWAY_GIT_COMMIT_SHA`)
-**Gates at end of run:** 901 passed, 9 skipped, 102 deselected; `ruff` clean
+**Gates at end of run:** 917 passed, 9 skipped, 102 deselected; `ruff` clean
 
 ---
 
@@ -56,7 +56,7 @@ which are blocked on a human.
 
 | | Workstream | Evidence produced | Blocked remainder |
 |---|---|---|---|
-| A | Operations | Branch B stale-ride drill 5/5 on QA | Operator login (§2) blocks A1, A2, A4–A8 |
+| A | Operations | Branch B stale-ride drill 5/5 on QA; cross-user access locked | Operator login (§2) blocks A1, A2, A4, A6–A8 |
 | B | Security + notifications | Privilege escalation closed; push registration fixed | MFA, RBAC granularity, Maps key |
 | C | Celery + Redis | Kill-the-worker matrix 14/14 on Linux; 12 duplicate-safety tests | Redis outage matrix, beat topology |
 | D | Load + performance | Query plans at 20k trips; pagination at HTTP boundary | Concurrent-ride load, percentiles |
@@ -121,15 +121,47 @@ half remains covered by 51 unit and integration tests, including the negative co
 that the detector changes no status and touches no money. The report says so rather
 than implying a full end-to-end.
 
-### A1, A2, A4–A8 (blocked)
+### A5 — the IDOR half (done)
 
-Operator login rehearsal, representative driver onboarding, the SOS operator path,
-support tooling with a cross-user IDOR test, financial investigation without SQL,
-unresolved-payout presentation, and usability fixes all require signing in to the
-console. All blocked behind §2. Nothing was substituted or simulated, and none of them
-should be marked anything but BLOCKED.
+A5 has two halves and they separate cleanly. The *support tooling* half needs an
+operator session and is blocked. The *cross-user access* half does not: it is answered
+by one ordinary rider holding a valid token and changing the id in the URL, which is
+exactly how a real attacker would ask it.
 
-One A-workstream item *was* advanced without console access, because it is an
+Sixteen tests across trips, receipts and support tickets. Measured:
+
+```
+attacker  -> trip detail        403      victim    -> trip detail    200  (control)
+other drv -> trip detail        403      assigned  -> trip detail    200  (control)
+attacker  -> receipt pdf        403      attacker  -> ticket detail  403
+attacker  -> resend receipt     403      victim    -> ticket detail  200  (control)
+attacker  -> ticket message     404      attacker  -> ticket close   404
+attacker  -> unknown trip id    404      cross-trip ticket create    404
+```
+
+All already correct — no product change was needed. Two properties worth naming: an
+*unassigned* driver is refused, so assignment rather than role is what authorises a
+driver to read a trip (every driver holds a valid driver token, and if role alone were
+enough any of them could read every ride ever taken); and an unknown id returns 404
+rather than 500, so authorization is not happening by accident of a crash.
+
+**A test of my own was wrong here, and the way it was wrong is the point.** It asserted
+`str(ticket.id) not in body or ticket.subject not in body`. Both halves were weak — a
+bare digit appears in any JSON — and the `or` let the first weak half short-circuit the
+second away, so it passed without evaluating its real assertion. It surfaced only
+because running it in isolation raised `AttributeError`: `subject` is not a field on
+`SupportTicket` at all. A test that passes because its assertion was never reached is
+worse than no test.
+
+### A1, A2, A4, A6–A8 (blocked)
+
+Operator login rehearsal, representative driver onboarding, the SOS operator path, the
+support *tooling* half of A5, financial investigation without SQL, unresolved-payout
+presentation, and usability fixes all require signing in to the console. All blocked
+behind §2. Nothing was substituted or simulated, and none of them should be marked
+anything but BLOCKED.
+
+One other A-workstream item was advanced without console access, because it is an
 authorization question rather than a workflow one — see §5.
 
 ---
@@ -690,6 +722,7 @@ boundary.
 | Change | Boundary | Tests |
 |---|---|---|
 | Operator privilege boundary | HTTP, real JWT, direct endpoint calls | 41 |
+| Cross-user access | HTTP, two real rider tokens, id substitution | 16 |
 | Push registration | HTTP, real two-step OTP flow | 11 |
 | Celery worker loss | Real broker + real worker subprocess + real SIGKILL | 14 assertions |
 | Duplicate execution | Celery task machinery + real database | 12 |
@@ -740,7 +773,7 @@ items that decide this.
 | 7 | Stale-ride operator queue | **YELLOW** | 51 tests including negative controls; the queue page itself has never been opened because of item 1. |
 | 8 | Audited recovery actions | **YELLOW** | Tested end to end including the audit row; never exercised through the console. |
 | 9 | SOS operator path | **BLOCKED** | SOS creation, dedup and dispatch are proven; the operator's side of it is not. |
-| 10 | Support tooling + IDOR | **RED** | Not tested this run. Cross-user access on support endpoints is unverified. |
+| 10 | Cross-user access (IDOR) | **GREEN** | 16 tests across trips, receipts and support tickets: cross-user reads 403, cross-user writes 404, owner and assigned driver 200. No product change was needed; the scoping was already correct. |
 | 11 | Financial investigation from ops UI | **BLOCKED** | Depends on item 1. |
 | 12 | Unresolved payout presentation | **YELLOW** | `unresolved` (not `FAILED`) is implemented and tested; the UI has not been seen. |
 
@@ -968,6 +1001,7 @@ What *is* established, and would form the body of that proof once A and E are cl
 | Every redeliverable task is safe to run twice | Proven, 12 tests |
 | No dominant query scans a large table at 20k trips | Proven, real PostgreSQL 15 |
 | An outsider cannot gain operator authority | Proven, and verified on the QA deployment |
+| One user cannot read another's trips, receipts or tickets | Proven, 16 tests at the HTTP boundary |
 | Nobody has signed in to the operations console | **Not proven — never attempted** |
 | The platform's capacity | **Unmeasured** |
 | Production runs, rolls back and restores | **Does not exist** |
