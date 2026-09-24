@@ -44,7 +44,7 @@ staged change against it dating from 2026-09-22, holds zero environment variable
 has no domain. There is no production PostgreSQL, no Redis, no Celery worker and no ops
 console. Separately, that service is wired to build from the `dev` branch, so every
 push during this run triggered a production build. All of them failed, and the reason
-they failed is itself a finding — see §29.
+they failed is itself a finding — see §20.
 
 ---
 
@@ -61,7 +61,7 @@ which are blocked on a human.
 | C | Celery + Redis | Kill-the-worker matrix 14/14 on Linux; 12 duplicate-safety tests | Redis outage matrix, beat topology |
 | D | Load + performance | Query plans at 20k trips; pagination at HTTP boundary | Concurrent-ride load, percentiles |
 | E | Production + release | Full production audit; CVE audit | Everything else — production does not exist |
-| F | Final pilot proof | See §33 | Depends on A and E |
+| F | Final pilot proof | See §32 | Depends on A and E |
 
 ---
 
@@ -83,7 +83,7 @@ the first command. It could not be run, by two independent paths:
 So the command is shipped, tested (16 tests) and ready, and it has still never been
 run. The consequence is not cosmetic: **every operator workflow rehearsal in workstream
 A remains unperformed**, because there is no account to sign in with and the password
-is not knowable from here. That is one human action — see §37, Human item 1.
+is not knowable from here. That is one human action — see §30, Human item 1.
 
 Per the instruction, non-operator work continued immediately rather than waiting.
 
@@ -218,7 +218,7 @@ This is not a gap in an RBAC implementation. There is no RBAC implementation. Bu
 one is in merge authority, but it is a design decision with a real product surface (who
 sees rider phone numbers? who can reverse a KYC decision? is there a maker-checker on
 payouts?) and shipping a half-wired version into a console nobody can currently sign
-into would be worse than shipping none. It is listed as Engineering item 2 in §37 with
+into would be worse than shipping none. It is listed as Engineering item 2 in §29 with
 the shape it should take.
 
 For a ten-driver pilot with one or two trusted operators, a single admin role is a
@@ -270,7 +270,7 @@ pre-fix code.**
 The driver app registers a token **at login only**. FCM rotates tokens (reinstall,
 restore, Firebase-initiated refresh) and there is no `onTokenRefresh` listener, so a
 driver who stays signed in for months can be holding a token the server no longer has.
-That needs a mobile change plus a refresh endpoint. Engineering item 4 in §37.
+That needs a mobile change plus a refresh endpoint. Engineering item 1 in §29.
 
 ---
 
@@ -281,7 +281,7 @@ marked GREEN. The server-side path is tested and the client-side handler exists 
 built to degrade quietly, but **no real device has been observed receiving a
 backgrounded ride offer from a push**, so nothing here is proof that a driver with a
 dark screen gets buzzed. That requires a physical handset, a real Firebase project and
-someone watching it. Human item 3 in §37.
+someone watching it. Human item 3 in §30.
 
 ---
 
@@ -427,7 +427,7 @@ ride/money/safety tasks twice through the task machinery and compare durable sta
 - **C4 Beat topology** — beat is still embedded in the worker via `-B`. Correct for one
   worker; a second worker would double every scheduled task. Tests assert every beat
   entry names a registered task and that both money sweeps are scheduled. The topology
-  decision itself is untouched. Engineering item 5 in §37.
+  decision itself is untouched. Engineering item 5 in §29.
 - **C5 Redis outage matrix** — partially covered by existing suites
   (`test_driver_exclusivity_redis_down.py`, `test_sos_survives_broker_outage.py`,
   `test_driver_trip_state_unavailable.py`, `test_trip_creation_broker_coherence.py`),
@@ -525,8 +525,7 @@ largest. Not done:
 
 **No p50/p95/p99 is reported anywhere in this document**, because nothing measured this
 run supports one. The instruction was not to fake production capacity claims, and the
-honest position is that this platform's capacity is unmeasured. Engineering item 3 in
-§37.
+honest position is that this platform's capacity is unmeasured. Engineering item 3 in §29.
 
 ---
 
@@ -565,7 +564,7 @@ rather than described as "production was never touched".
 **This is the launch-blocking part:** the instant someone gives that service its
 variables and a domain, every merge to `dev` becomes a production release. The branch
 wiring must change to a release branch or to manual deploys **before** production is
-configured, not after. Human item 2 in §37.
+configured, not after. Human item 2 in §30.
 
 ---
 
@@ -619,7 +618,7 @@ What was measured rather than assumed:
   latest is 6.0.1) or calling the Cashfree REST API directly — are tractable.
 
 `requirements.txt` is unchanged. Both routes touch the payments path, and the standing
-boundary is that a Cashfree SDK upgrade needs sandbox proof. Human item 4 in §37.
+boundary is that a Cashfree SDK upgrade needs sandbox proof. Human item 4 in §30.
 
 ---
 
@@ -948,7 +947,37 @@ Risk ordered.
 
 ---
 
-## 31. Honest summary
+## 32. Workstream F — final pilot proof
+
+F cannot be completed, and the reason is structural rather than a matter of remaining
+effort: a *final pilot proof* is a statement about a system running where the pilot will
+run. There is no such system (§18), and the operator half of the product has never been
+exercised by a person (§2). Anything called a final proof today would be a proof about
+QA, described as a proof about production.
+
+What *is* established, and would form the body of that proof once A and E are closed:
+
+| Claim | Status |
+|---|---|
+| A rider can book, ride and pay end to end, no engineer | Proven on QA, 30/30, trip 46 |
+| The money reconciles exactly, one earnings row, `final_fare` NULL | Proven on QA, trip 46 |
+| The displayed fare decomposition closes to the paisa | Proven at the HTTP boundary |
+| A crashed driver recovers their own trip and returns to supply | Proven on QA, trip 47 |
+| An abandoned ride is neither cancelled nor charged | Proven on QA, trip 49, 12 min silence |
+| A killed worker loses no work | Proven, real SIGKILL, real broker |
+| Every redeliverable task is safe to run twice | Proven, 12 tests |
+| No dominant query scans a large table at 20k trips | Proven, real PostgreSQL 15 |
+| An outsider cannot gain operator authority | Proven, and verified on the QA deployment |
+| Nobody has signed in to the operations console | **Not proven — never attempted** |
+| The platform's capacity | **Unmeasured** |
+| Production runs, rolls back and restores | **Does not exist** |
+
+The first nine lines are a genuine pilot-mechanics proof and they are worth reading as
+one. The last three are why this section does not claim more.
+
+---
+
+## 33. Honest summary
 
 The pilot's *mechanics* are in good shape and getting better: a ride completes, the
 money reconciles to the paisa, a crashed driver recovers themselves, an abandoned ride
