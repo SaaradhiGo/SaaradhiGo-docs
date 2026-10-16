@@ -233,6 +233,14 @@ If a genuinely consolidated figure is wanted later, it needs an FX policy
 decided by the business: which rate, as of when, and snapshotted where. That is
 a product decision, and it is listed here rather than guessed at.
 
+**The daily ops dashboard keeps one day boundary**, the deployment's, and that
+is also now a stated convention rather than the timezone setting showing
+through. These are platform-wide tiles and the ops team reading them sits in
+one place, so a single cut-off is what makes them comparable day to day — at
+the cost that Indian midnight splits a US afternoon. The money tiles there are
+already per currency (`gmv_by_currency`, `withdrawals.completed_today_by_currency`),
+and the flat `gmv` is `null` rather than a sum when the day spans markets.
+
 ---
 
 ## India did not move, and that is asserted
