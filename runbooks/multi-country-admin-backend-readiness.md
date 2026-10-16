@@ -45,6 +45,7 @@ things that were India-shaped are resolved per market.
 | Phone numbers + log redaction | **Ready** | `+1` normalisation; redaction no longer India-only |
 | Tax precision | **Ready** | 3 decimal places — 8.625% was being charged as 8.62% |
 | Money aggregation | **Ready** | Every money `Sum()` is now currency-grouped or currency-scoped |
+| Executive revenue report | **Ready** | Reports one market at a time, with a selector |
 
 ### The blocker that was removed
 
@@ -202,6 +203,38 @@ to be wrong:
 
 ---
 
+## One decision worth recording: the executive report scopes, it does not convert
+
+The executive revenue report is the one screen where a single number is the
+whole point — GBV, platform revenue, the take rate, the vehicle-class split,
+the monthly series, month-over-month growth. Every one of those is built by
+adding `final_fare` across completed trips.
+
+There were three options:
+
+1. **Add them anyway.** ₹190 + $30.83 = 220.83, which is not an amount of
+   money in either currency, and the template renders it with a leading symbol
+   — so the page would assert it was rupees. Growth percentages computed from
+   such a number are worse than wrong: they move when the currency mix moves,
+   not when the business does. A board figure that drifts with volume mix.
+2. **Convert at a rate.** There is no FX source in this system. Adding one
+   makes a board figure depend on a number nobody in this repo owns, and a
+   historical report would change value every time the rate moved unless rates
+   were snapshotted per trip — which is a project, not a patch.
+3. **Report one market at a time.** Every figure stays an amount of money, the
+   growth rates stay meaningful, and nothing is invented.
+
+It does (3). The report defaults to the only currency with data — so the India
+pilot's page is unchanged, with no selector and no banner — and shows a market
+selector plus a one-line scope statement once a second market has rides. That
+behaviour is asserted in four tests, including the single-market control.
+
+If a genuinely consolidated figure is wanted later, it needs an FX policy
+decided by the business: which rate, as of when, and snapshotted where. That is
+a product decision, and it is listed here rather than guessed at.
+
+---
+
 ## India did not move, and that is asserted
 
 The entire risk of this change is a refactor that silently reprices a live
@@ -279,6 +312,18 @@ remaining item for a US launch.
   and that copy is fixed.
 - **Per-zone revenue aggregation.** Safe by construction: a zone has exactly
   one currency.
+
+### A dead-code trap worth knowing about
+
+`templates/admin_pages/riders.html` has two large `{% comment %}` blocks
+(lines 3–65 and 1086–1461) that contain a full rider-detail panel, wallet
+balance and wallet-transaction rows included. None of it renders.
+
+Three currency fixes were applied there before this was noticed, and then
+reverted: editing dead markup adds diff noise and implies the page does
+something it does not. If that panel is ever uncommented it needs
+`|money:row.currency` on each amount, and the test file records that. Worth
+checking for the same trap before "fixing" any other console template.
 
 ### Verification I could not complete
 
