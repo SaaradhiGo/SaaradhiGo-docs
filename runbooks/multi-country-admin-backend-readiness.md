@@ -44,6 +44,7 @@ things that were India-shaped are resolved per market.
 | Timezones ("today", night surge) | **Ready** | Each market's own midnight; night window in the zone's clock |
 | Phone numbers + log redaction | **Ready** | `+1` normalisation; redaction no longer India-only |
 | Tax precision | **Ready** | 3 decimal places — 8.625% was being charged as 8.62% |
+| Money aggregation | **Ready** | Every money `Sum()` is now currency-grouped or currency-scoped |
 
 ### The blocker that was removed
 
@@ -188,6 +189,17 @@ boundaries, worse things than the layers had:
   Kolkata — and a genuine 1am ride was not. A fare charged at the wrong time of
   day, with nothing erroring.
 
+Two more surfaced in the aggregation sweep, and neither needed a second market
+to be wrong:
+
+- `check_monthly_upi_limit` computed its window as
+  `timezone.now().replace(day=1, hour=0, ...)` — **UTC** midnight, which is
+  05:30 IST. A withdrawal taken in the first five and a half hours of an Indian
+  month counted against the **previous** month's NPCI ceiling. Wrong today, in
+  the live market.
+- the driver-loyalty page labelled `Sum(actual_distance_km)` as `mi`. Indian
+  kilometres presented as miles.
+
 ---
 
 ## India did not move, and that is asserted
@@ -248,20 +260,25 @@ remaining item for a US launch.
   trigger for moving to `phonenumbers`: more than five countries, or a country
   with variable-length national numbers. India (10) and the US (10) are both
   fixed-length, so the library is not yet worth the dependency.
-- **Remaining unqualified money `Sum()` call sites.** The headline operator
-  figures were converted to group by currency (payment dashboard, transaction
-  reconciliation, fleet GMV, withdrawals-today). Roughly ten lower-traffic
-  aggregations in `admin_dashboard/views.py` and `driver/services.py` still sum
-  an `amount` column without qualifying by currency. **They are correct today**
-  — one market has money — and each is wrong the moment a second market has
-  revenue. `base/money.sum_by_currency()` is the fix and deliberately provides
-  no single-number `total_revenue()`. The per-zone revenue annotation is
-  *safe* by construction, since a zone has exactly one currency.
-- **India's UPI/NPCI compliance limits are still India-only constants**
-  (₹100,000 daily, ₹200,000 monthly, >₹50,000 reporting) in
-  `driver/services.py`. They are correct for the only market that has a payout
-  rail, and they are unreachable from a non-INR withdrawal now that the UPI path
-  refuses one.
+- **India's UPI/NPCI limits remain India-only constants** (₹100,000 daily,
+  ₹200,000 monthly, >₹50,000 reporting) in `driver/services.py`. That is
+  correct — they are NPCI's figures for the only market that has a payout rail —
+  and they are now explicitly INR-scoped rather than implicitly so, and
+  unreachable from a non-INR withdrawal. A second payout rail will need its own
+  limits, not a translation of these.
+
+### Checked and found to need nothing
+
+- **SOS.** No hardcoded emergency service number. The fan-out goes to ops and
+  to the user's own emergency contact, which is market-agnostic.
+- **SMS.** AWS SNS, which publishes to E.164 numbers in both countries.
+  India's DLT sender-ID registration and the US's 10DLC/toll-free registration
+  are account-level prerequisites, not code.
+- **Service-area enforcement.** Already zone-table driven, not a hardcoded
+  Hyderabad polygon — only the operator-facing message still said "Hyderabad",
+  and that copy is fixed.
+- **Per-zone revenue aggregation.** Safe by construction: a zone has exactly
+  one currency.
 
 ### Verification I could not complete
 
