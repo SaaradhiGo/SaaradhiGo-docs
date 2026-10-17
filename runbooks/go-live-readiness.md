@@ -27,10 +27,22 @@
 > that caught the `access`/`token` login defect, extended past authentication.
 > **28 object-authorization probes** confirm the boundaries hold.
 >
-> Local test state: backend 1,372 passed / 9 pre-existing Redis failures;
-> driver 449 passed, analyze clean; rider 249 passed, no analyze errors.
-> PostgreSQL concurrency tests and all CI are **UNKNOWN** -- no local
-> PostgreSQL, and this batch was committed but not pushed.
+> **CI certified 2026-10-17.** All four branches pushed; **9 of 9 jobs green**
+> across driver, rider and backend. Backend CI: **1,417 passed**, and the 9
+> tests that fail locally for want of Redis pass there, as do the **102
+> PostgreSQL concurrency tests** that no local run can execute -- both were
+> UNKNOWN until this push and are now PASS. Driver **459** tests, rider
+> **259**; both `release-config` jobs confirm the signing guard still refuses
+> an unsigned release build with no secrets on the runner.
+>
+> Two further defects were found during the CI/release recheck and fixed:
+> **the driver app's REST base URL had no `/api/v1`**, so every REST call in
+> it 404d -- login included -- and the build script had given the driver the
+> rider's opposite WebSocket convention, which would have produced
+> `/wsws/...`. Both apps now pin URL composition against real backend routes.
+> And **rider cancellation now requires server confirmation before any local
+> state is cleared**, with a failure preserving recoverable trip state and
+> telling the rider.
 >
 > The four owner-controlled blockers are unchanged: keystore backup
 > verification, Firebase credentials, a QA Maps key, and QA SES. Every push,
