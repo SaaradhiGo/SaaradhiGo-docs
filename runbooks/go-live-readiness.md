@@ -47,6 +47,13 @@
 > The four owner-controlled blockers are unchanged: keystore backup
 > verification, Firebase credentials, a QA Maps key, and QA SES. Every push,
 > Maps and email row in the device checklist fails for want of one of them.
+>
+> **The procedure for clearing all four, and for certifying the apps on two
+> phones afterwards, is [`qa-activation-handoff.md`](qa-activation-handoff.md)**
+> — exact actions, verification commands, expected results, stop conditions
+> and rollback per step. It adds a fifth item found while preparing it:
+> QA has no Cashfree credentials, so online payment cannot be exercised and
+> the acceptance test settles in cash.
 
 
 

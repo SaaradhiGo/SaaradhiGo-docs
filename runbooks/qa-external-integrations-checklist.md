@@ -1,5 +1,11 @@
 # QA external integrations — exact configuration to apply
 
+> **The ordered procedure built from this page — with verification,
+> stop conditions and rollback for each step, plus the QA deployment
+> sequence and the two-phone acceptance test — is
+> [`qa-activation-handoff.md`](qa-activation-handoff.md). Start there.
+> This page remains the specification for *what* each integration is.**
+
 > ## Owner action list, with the check that proves each one
 > *(Re-verified 2026-10-17, batch 6. Nothing below was performed: all four
 > need consoles or credentials this environment does not have.)*
