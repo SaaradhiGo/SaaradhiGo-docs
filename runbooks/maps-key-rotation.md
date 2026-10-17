@@ -81,6 +81,74 @@ the harder ones.
 
 ---
 
+## 2a. Re-verified 2026-10-16, and what still cannot be checked here
+
+Re-audited after the canonical driver decision. Nothing in the picture above
+changed, and two things are now firmer:
+
+- **No mobile app depends on a Google Maps key.** Neither `pubspec.yaml` nor
+  either `pubspec.lock` contains `google_maps_flutter`; the rider renders with
+  `flutter_map ^6.1.0` and the canonical driver with `flutter_map ^8.3.1`, both
+  over OSM tiles. The `feat/driver-app-rebuild` row below is now moot — that
+  branch is not the canonical app.
+- **The canonical driver app is now *tested* to stay that way.**
+  `test/android_manifest_test.dart` asserts the manifest contains neither
+  `AIza` nor `com.google.android.geo.API_KEY`, so the app cannot quietly
+  acquire a dependency on the key that has to be rotated.
+- **Key `863b98dead568420` is in no file at HEAD of any repo.** It survives
+  only in two rider commits (`e521d20`, `e077dfc`), which is enough to require
+  rotation but means no build reads it.
+- **Key `338d92da324c` (the Firebase Android key in
+  `SaaradhiGo-mobile/android/app/google-services.json`) is still committed.**
+  That is how Firebase config is meant to ship, so it is not the same class of
+  leak — but it is still a Google API key and needs an Android application
+  restriction (package + SHA-1) or it can be spent from anywhere.
+  `web/firebase-config.js` holds the literal string `AIzaSy-placeholder`, not
+  a key.
+
+### Live usage and restrictions: not checkable from here
+
+Determining the key's **current restrictions and recent usage** needs Google
+Cloud Console access, which this environment does not have. It was also not
+probed with a test request: that would mean sending a production credential to
+a third party and putting a line in the owner's billing, to learn something
+one console page states directly. Owner action.
+
+### Deciding whether the deployed backend key IS the exposed key
+
+The backend reads `GOOGLE_MAPS_API_KEY` from the environment with an empty
+default (`base/settings.py:790`) — no literal anywhere in source — so whether
+the deployed value is the compromised key cannot be determined from the repos.
+Compare fingerprints rather than pasting the key anywhere:
+
+```bash
+# Run where the deployed value is visible. Prints 12 hex characters, not a key.
+printf '%s' "$GOOGLE_MAPS_API_KEY" | sha256sum | cut -c1-12
+```
+
+- `863b98dead56` → it **is** the compromised key. Rotate per section 4, and
+  expect the four routes below to fail until the new key is in place.
+- anything else → the compromised key has no live consumer at all, and
+  revoking it breaks nothing.
+
+### What breaks if the key is revoked while the backend still uses it
+
+Four routes, all in `servers/ride/`, all proxies that exist so the apps never
+hold a key:
+
+| Route | Google API | Rider-visible effect |
+|---|---|---|
+| `POST /ride/maps/geocode` | Places Autocomplete | address search returns nothing |
+| `POST /ride/maps/place-details` | Place Details | a chosen suggestion cannot be resolved to coordinates |
+| `POST /ride/maps/reverse-geocode` | Geocoding | the pickup pin shows no address |
+| `POST /ride/maps/directions` | Directions | no route line and no ETA |
+
+Each wrapper returns `None` and logs an error when the key is unset, so the
+failure is degraded search rather than a 500 — but the rider cannot enter a
+destination, which ends the booking flow.
+
+---
+
 ## 3. Required restrictions (apply to every key, old and new)
 
 A key with no restrictions is a billable resource anyone who reads your APK can

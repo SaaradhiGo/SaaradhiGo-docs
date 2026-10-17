@@ -125,6 +125,50 @@ To build a release APK *without* a keystore — for a smoke test only — use
 `flutter build apk --release -PallowDebugSigning=true`. It logs a warning
 every time and the artifact must never be distributed.
 
+### Verified on this machine, 2026-10-16
+
+The earlier report that local Android tooling could not produce a release
+build is **no longer true**. The missing pieces were SDK components, which
+the first attempts downloaded and accepted (NDK r27, Platform 35, CMake
+3.22.1). Both apps now build:
+
+| App | Command | Result |
+|---|---|---|
+| Driver | `flutter build apk --release` | **Refused**, with the signing guard's own message — the guard works against real Gradle, not only in the text test |
+| Driver | `flutter build apk --release -PallowDebugSigning=true` | Built, 60.0 MB, 241 s |
+| Rider | `flutter build apk --release` | **Refused**, same message, 16 s |
+| Rider | `flutter build apk --release -PallowDebugSigning=true` | Built, 61.0 MB, 179 s |
+| Rider | `flutter build appbundle` | **Refused** — the guard covers the AAB path too, which is the one Play needs |
+
+`apksigner verify --print-certs` on the opt-out APK reports
+`CN=Android Debug`, confirming the warning tells the truth. Both artifacts
+were deleted afterwards: a 60 MB file called `app-release.apk` is exactly
+what gets sideloaded by mistake.
+
+Both keystores were verified readable with the passwords in
+`credentials.txt`, with the expected aliases, valid to 2054:
+
+| App | Alias | SHA-1 |
+|---|---|---|
+| Rider | `saaradhigo-rider-upload` | `71:3A:45:6A:B2:C0:C4:FF:FF:43:FF:A6:E5:66:30:37:A2:D9:2B:1D` |
+| Driver | `saaradhigo-driver-upload` | `94:1B:99:B0:32:51:CF:09:92:A3:AE:C3:C3:B5:8A:FD:60:27:51:0F` |
+
+### Two things to settle before the first upload
+
+- **Play needs an `.aab`, not an `.apk`.** New apps have been App Bundle only
+  since August 2021, so the Play command is `flutter build appbundle
+  --release`, with the APK kept for sideloaded pilot distribution.
+- **60 MB is a universal APK** carrying native libraries for every ABI. For
+  drivers on metered data, `--split-per-abi` (or the AAB, which Play splits
+  server-side) cuts that to roughly a third. Worth doing before asking anyone
+  to download it over mobile data.
+- **The driver app's `applicationId` is still the generated
+  `com.saaradhigo.saaradhigo_driver`.** An applicationId can never change
+  after the first upload. If the pilot should ship as `com.saaradhigo.driver`,
+  that has to be decided *before* the first release reaches the Play Console.
+  Flagged in `android/app/build.gradle.kts` rather than changed, because it is
+  a product decision and the upload key does not care which id it signs.
+
 ---
 
 ## 4. Play App Signing — what it changes
