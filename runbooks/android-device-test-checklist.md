@@ -135,17 +135,80 @@ other way.
       enough.
 - [ ] GPS reconnects after a tunnel / signal loss without the driver acting.
 
-## 5. Push notifications
+## 5. Push notifications — a ride offer that reaches a sleeping phone
 
-Standing rule: **do not mark a background push PASS without observing it on a
-device.**
+> **Nothing here can pass until the owner has done two things**
+> (`qa-external-integrations-checklist.md` §4): added an Android app for
+> `com.saaradhigo.driver` to the Firebase project and placed its
+> `google-services.json` in `SaaradhiGo-driver/android/app/`, and set
+> `FIREBASE_CREDENTIALS_JSON` on the `backend` and `celery` services.
+>
+> Push has never worked in any environment for either app -- the backend had
+> no supported way to configure Firebase credentials until batch 5 -- so this
+> whole section is a first run, not a regression check.
 
-- [ ] Ride offer arrives with the driver app **backgrounded**.
-- [ ] Ride offer arrives with the driver app **killed** (swiped away).
-- [ ] Rider receives trip-status pushes (accepted, arrived, started,
-      completed).
-- [ ] Notification permission prompt appears on first run (Android 13+), and
-      the app behaves sensibly if it is denied.
+### Is it even on?
+
+- [ ] The driver app's log says push initialised, not "FCM unavailable:
+      Firebase could not start". The second message means the build has no
+      `google-services.json` and everything below will fail for that reason
+      alone.
+- [ ] Android 13+: the app asked for notification permission on first login,
+      and the system dialog appeared.
+- [ ] Settings → Apps → SaaradhiGo Driver → Notifications shows a **Ride
+      offers** channel at the highest importance. Its importance is fixed when
+      the channel is created, so a phone that installed an earlier build keeps
+      the old setting -- uninstall first if in doubt.
+- [ ] Server side, after one QA login: the driver's `fcm_token` is a real
+      token, **not** `dummy_device_token` and not null.
+
+### The three app states
+
+- [ ] **Foregrounded.** With the driver on duty and the dashboard open,
+      dispatch an offer. The bottom sheet appears **once**, and a heads-up
+      notification is also posted (Android shows nothing by itself for a
+      foreground message, so this is the app doing it).
+- [ ] **Foregrounded, screen off.** Same, with the phone's screen off. The
+      heads-up notification wakes the screen.
+- [ ] **Backgrounded.** Home-button out of the app, then dispatch. A
+      notification arrives. Tapping it opens the app and lands on the offer.
+- [ ] **Terminated.** Swipe the app away from recents, then dispatch. A
+      notification arrives; tapping it launches the app and it lands on the
+      offer rather than the dashboard. *(This is the path that depends on the
+      launch message being read before the first frame and retained until a
+      screen exists.)*
+- [ ] **Doze / battery optimisation.** Leave the phone idle and unplugged for
+      30+ minutes, then dispatch. Record what happens -- on Xiaomi, Vivo, Oppo
+      and Realme builds this is where delivery is throttled or dropped, and it
+      is a property of the handset, not a bug to fix in the app.
+
+### No duplicates, no stale offers
+
+- [ ] **Both channels, one sheet.** Dispatch with the app foregrounded and
+      connected, so the socket frame and the push both arrive. The sheet
+      appears exactly **once**.
+- [ ] **Accept, then a second wave.** Accept an offer, then have dispatch run
+      another wave for the same trip. No sheet reappears over the ride screen.
+- [ ] **Decline, then the push lands.** Decline, then let the push arrive. The
+      same trip is not offered again.
+- [ ] **A stale notification.** Leave an offer notification unopened for more
+      than 90 seconds (`TRIP_ACCEPT_TIMEOUT_SECONDS`), then tap it. The app
+      opens with no sheet -- the offer is dropped silently, because
+      `auto_cancel_trip` has already closed that trip.
+- [ ] **A push whose ride is gone.** Tap a notification for a trip another
+      driver has taken. The app says "That ride is no longer available"
+      instead of leaving the driver on a dashboard wondering.
+- [ ] **Already on a trip.** With a trip in progress, let an offer push
+      arrive. No sheet, no interruption.
+
+### Token lifecycle
+
+- [ ] **Logout.** Log out, then have ops trigger a push to that driver.
+      Nothing arrives, and the user row's `fcm_token` is null.
+- [ ] **Reinstall.** Uninstall and reinstall, then log in. A ride offer still
+      arrives -- the rotated token was registered.
+- [ ] **A second driver on the same handset.** Log out, log in as a different
+      QA driver, dispatch to the *first* driver. The phone receives nothing.
 
 ## 6. Rider SOS and operational alert receipt
 
@@ -289,3 +352,21 @@ that matter.
   exercises the backend with synthetic clients and excludes auth entirely.
 - **Any payment beyond cash.** Cashfree is sandbox-only; live payments held.
 - **Email delivery.** Nothing will arrive until SES/SMTP is configured.
+- **Push delivery, end to end.** Everything above the FCM seam is covered by
+  tests with a fake transport -- parsing, deduplication, staleness, token
+  rotation, logout cleanup, the terminated-app handoff. None of it proves
+  Google delivered anything to a particular handset in a particular app state,
+  and it cannot work at all until the Firebase service account and
+  `google-services.json` exist. Section 5 is a first run, not a regression
+  check.
+- **Whether a push can present a full offer.** It cannot today, by design of
+  the API rather than by choice: the push carries only `{trip_id, type}`, and
+  `GET /ride/trip/<id>/` refuses a driver who is not yet assigned. A tapped
+  notification brings the app forward and the dispatch socket supplies the
+  details; if the socket does not, the driver is told the ride is gone. Whether
+  that handoff is fast enough in practice -- on a cold start, on a weak
+  network -- is a device question and the most likely thing to need a backend
+  change afterwards.
+- **OEM battery management.** Xiaomi, Vivo, Oppo and Realme builds throttle or
+  drop background delivery in ways no code change fixes. Record behaviour per
+  handset rather than treating a miss as a bug.
