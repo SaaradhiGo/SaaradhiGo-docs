@@ -106,7 +106,54 @@ changed, and two things are now firmer:
   `web/firebase-config.js` holds the literal string `AIzaSy-placeholder`, not
   a key.
 
-### Live usage and restrictions: not checkable from here
+### Verified from the Railway service configuration, 2026-10-17
+
+Read-only; no values were requested and nothing was modified. The variable
+**names** on each repo-connected service answer the question the repos could
+not:
+
+| Service / environment | `GOOGLE_MAPS_API_KEY` |
+|---|---|
+| `backend` (QA) | **absent** |
+| `celery` (QA) | **absent** |
+| `web` (QA) | absent — only `NEXT_PUBLIC_API_BASE_URL`, `NODE_ENV` |
+| `SaaradhiGo-backend` (production) | no variables at all; staged for deletion |
+
+So the compromised key has **no live consumer anywhere that this project
+controls**: not in either mobile app (neither has `google_maps_flutter`), and
+not in any Railway service. Revoking it should break nothing.
+
+Caveat worth one minute of the owner's time before revoking: Railway
+environment-level shared variables were not enumerated, and a consumer
+outside this project (another Cloud project, a script, a spreadsheet add-on)
+cannot be seen from here. The Cloud Console's usage graph for the key answers
+both.
+
+### The consequence of QA having no key is bigger than fares
+
+This was previously recorded as "QA fares use the haversine fallback", which
+is true and incomplete. All four proxies **return HTTP 502 `API_ERROR`** when
+the key is unset — the wrappers return `None` and the views turn that into an
+error, by design:
+
+| Route | Rider-visible effect on QA today |
+|---|---|
+| `/ride/maps/geocode` | destination search returns nothing |
+| `/ride/maps/place-details` | a chosen suggestion cannot be resolved |
+| `/ride/maps/reverse-geocode` | the pickup pin shows no address |
+| `/ride/maps/directions` | no route line, no ETA |
+
+The **rider** app calls all four (`AppConfig.maps*`). The **driver** app calls
+none. So a rider on QA cannot book by typing a destination, which has to be
+settled before the device acceptance pass — not by rotation, but by giving QA
+its own restricted key.
+
+**This changes the recommended order.** QA has never had a key, so there is no
+QA rotation to perform: create a *new* restricted server key for QA, and a
+separate one for production when production goes live. Revoking the exposed
+key is then independent of both, and safe.
+
+
 
 Determining the key's **current restrictions and recent usage** needs Google
 Cloud Console access, which this environment does not have. It was also not

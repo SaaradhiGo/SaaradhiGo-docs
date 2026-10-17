@@ -144,6 +144,38 @@ never affect the production sending reputation.
 
 Applying Railway variables is a deploy, so this waits for the deploy gate.
 
+#### Current state, verified 2026-10-17
+
+The QA `backend` and `celery` services have **none** of these variables —
+confirmed from each service's variable *names* in Railway (no values were
+requested). So QA cannot send anything today, and every receipt and
+password-reset has been failing into `Receipt.send_failure_reason` and the
+log.
+
+#### Apply them in this order. The order is the safety.
+
+1. **`AUTH_EMAIL_ALLOWLIST` first**, before any credential exists. Setting it
+   while nothing can send is free; setting it after the credentials means a
+   window in which the deployment can reach anybody.
+2. `ENVIRONMENT` — confirm it is not `production`.
+3. `EMAIL_BACKEND`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`,
+   `DEFAULT_FROM_EMAIL`.
+4. `EMAIL_HOST_USER` and `EMAIL_HOST_PASSWORD` **last**.
+
+Between steps 3 and 4, and again after 4, run:
+
+```
+python manage.py email_safety_check --to <a QA address> --to <a non-QA address>
+```
+
+It sends nothing, prints no credential, and states plainly whether the
+deployment can send and whether each address would be reached. An empty
+allowlist reports "allowed to email nobody", which is the safe default and
+not a misconfiguration.
+
+> The one irreversible mistake in this whole runbook is setting the SMTP
+> credentials before the allowlist. Nothing else here cannot be undone.
+
 ---
 
 ## 5. What QA can do before any of this exists
@@ -163,13 +195,28 @@ The API is fully exercisable; only the delivery leg is missing.
 
 ## 6. Verification once configured
 
-1. `manage.py shell -c "from django.core.mail import send_mail; send_mail('t','t','no-reply@qa.saaradhigo.in',['qa@deeptrics.com'])"` → arrives.
-2. Same, to an address **not** on the allowlist → does **not** arrive, and
-   `auth_email_blocked` appears in the log.
+0. `manage.py email_safety_check --to qa@deeptrics.com --to
+   someone@gmail.com` → reports that it can send, that the QA address is
+   allowed and the other is refused. Do this first; it sends nothing.
+1. `manage.py shell -c "from django.core.mail import send_mail;
+   send_mail('t','t','no-reply@qa.saaradhigo.in',['qa@deeptrics.com'])"` →
+   arrives.
+
+   > **This call bypasses the allowlist.** `send_mail` is Django's own API;
+   > the allowlist lives in `base/auth_email.send_message`, which every
+   > application path goes through. Use it only to prove the SMTP credentials
+   > work, and only ever with an address you own. Do **not** conclude
+   > anything about the allowlist from it — step 2 is the test that does.
+2. `POST /auth/password/forgot/` for an account whose address is **not** on
+   the allowlist → nothing arrives and `auth_email_blocked` appears in the
+   log. This goes through the real gate.
 3. `POST /auth/password/forgot/` for an allowlisted QA account → link arrives,
    sets a password, works once.
-4. Complete a trip → the receipt email arrives. *(This is the first time
-   receipts will ever have been delivered.)*
+4. Complete a trip → the receipt email arrives, with its PDF attached.
+   *(This is the first time receipts will ever have been delivered.)* Receipts
+   now go through the same gate as the auth emails, so a receipt for a rider
+   whose address is not allowlisted is blocked on QA — which is the point, and
+   something to expect rather than debug.
 5. Check SES bounce/complaint metrics after the first batch.
 
 ---

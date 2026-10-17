@@ -19,17 +19,52 @@ other way.
       aggressive battery management (Xiaomi / Vivo / Oppo / Realme / Samsung).
       **At least one Android 14+ (API 34) device is required** — the
       foreground-service fix only matters from there.
-- [ ] Install from the CI debug APK artifact, or a signed release APK if the
-      keystore secrets have been added.
-- [ ] Confirm the build points at QA: `AppConfig.environmentLabel` is shown in
-      the app.
+- [ ] Build the QA artifacts with the build script in each app, not by hand:
+
+      ```
+      tool/build_release.sh qa-apk      # signed, needs the backup gate cleared
+      tool/build_release.sh smoke-apk   # debug-signed, for a pipeline check
+      ```
+
+      Both produce `--split-per-abi` APKs. Install the **arm64-v8a** one on a
+      modern phone (22 MB for the driver, 24 MB for the rider, against ~60 MB
+      for a universal build). `qa-apk` refuses to run until
+      `SAARADHIGO_KEYSTORE_BACKUP_VERIFIED=yes` is set — see
+      `android-signing-setup.md`.
+- [ ] Confirm the build says it is QA **on the device, not from the command
+      you typed**: the driver app shows a red `QA` corner banner on every
+      screen, and the rider app shows its environment badge. A QA build with
+      no banner means the artifact is not what you think it is.
 - [ ] Have QA accounts ready — `qa-test-accounts.md`. Route A (phone + OTP
       bypass) works today; Route B (email) needs email delivery configured.
 
-> **Known QA limitation that affects fares:** QA has **no**
-> `GOOGLE_MAPS_API_KEY`, so Distance Matrix is never called and every quote
-> uses the haversine × 1.4 fallback. Expect `validated_km` to differ from a
-> real road distance — that is the fallback working, not a bug.
+> ### Two QA limitations that will shape what you can test
+>
+> **1. QA has no `GOOGLE_MAPS_API_KEY`, and this is worse than a fare
+> fallback.** Verified from the Railway service's variable list, not assumed.
+> All four map proxies return **HTTP 502 `API_ERROR`** when the key is unset:
+>
+> | Route | Rider-visible effect on QA today |
+> |---|---|
+> | `/ride/maps/geocode` | destination search returns nothing |
+> | `/ride/maps/place-details` | a chosen suggestion cannot be resolved |
+> | `/ride/maps/reverse-geocode` | the pickup pin shows no address |
+> | `/ride/maps/directions` | no route line, no ETA |
+>
+> The **rider** app calls all four. The **driver** app calls none of them, so
+> driver-side testing is unaffected. Fares also fall back to haversine × 1.4,
+> so `validated_km` will differ from real road distance — that part is the
+> fallback working.
+>
+> **A rider cannot book by typing a destination on QA until a restricted QA
+> Maps key exists.** Decide before the device pass whether to create one (see
+> `maps-key-rotation.md`) or to certify booking by map pin only and record the
+> search path as UNTESTED.
+>
+> **2. No email will arrive until SES is configured.** Run
+> `python manage.py email_safety_check --to <the QA address>` against QA
+> first: it reports whether the deployment can send and whether that address
+> is allowed, without sending anything.
 
 ---
 
@@ -181,14 +216,65 @@ device.**
 - [ ] A support-level operator cannot create an operator account (403).
 - [ ] An invited account's response contains **no password**.
 
-## 10. Release build, once signing secrets exist
+### Ending a session — the part only a device can prove
 
-- [ ] CI `release-config` job green on the branch.
-- [ ] A signed release APK installs on a clean device.
+Both apps were changed so that a secure-storage failure cannot bring a
+logged-out session back. Tests simulate a store that throws; a real Android
+Keystore cannot be made to throw on demand, so these are the device checks
+that matter.
+
+- [ ] **Log out, force-stop, reopen.** Both apps land on the login screen,
+      not on a restored session.
+- [ ] **Log out while offline** (aeroplane mode). Logout still completes and
+      the app lands on the login screen — the server call is best-effort and
+      must not block it.
+- [ ] After a logout, the refresh token is **rejected server-side**: the old
+      session cannot be resumed from another client. (Ops can confirm the
+      token is blacklisted; the app calls `POST /auth/logout/` now.)
+- [ ] **Reinstall over the top** (`adb install -r`, same signing key). A
+      session from before the upgrade behaves as expected and no stale
+      credential is silently reused.
+- [ ] A wrong **email** password does *not* produce "Your session has
+      expired." It must say the credentials were wrong. (The refresh path used
+      to run on a rejected email login.)
+- [ ] With the app signed in, change the device screen lock / re-enrol
+      biometrics, then reopen. This is the real-world trigger for a Keystore
+      entry becoming undecryptable: the app must either keep working or end
+      the session cleanly, never restore a half-session.
+
+## 10. Release build and store artifact
+
+- [ ] CI `release-config` job green on the branch — it proves the signing
+      guard refuses an unsigned release build **with no secrets configured**,
+      and that the documented opt-out still works.
+- [ ] `tool/build_release.sh qa-apk` produced the installed artifact.
+- [ ] A signed release APK installs on a clean device, **and** installs over
+      an earlier build of the same key (`adb install -r`) without a signature
+      error. An upgrade failure here is how a pilot ends with drivers unable
+      to take an update.
 - [ ] `apksigner verify --print-certs` shows **your** key, not
-      "CN=Android Debug".
-- [ ] The release build refuses a non-production host
-      (`AppConfig.misconfiguration` guard).
+      "CN=Android Debug". The build script prints this for every split APK;
+      read it rather than trusting the command you typed.
+- [ ] A release build with the production URLs but **without**
+      `ALLOW_NON_PRODUCTION_HOST` refuses to start when pointed at QA — and a
+      production-pointed build starts normally.
+- [ ] A release build compiled with **no** `--dart-define` at all shows the
+      "This build cannot be used" screen rather than silently using the dev
+      API.
+
+### Before the first Play upload
+
+- [ ] **`.aab`, not `.apk`.** New apps have been App Bundle only since August
+      2021. `tool/build_release.sh play-aab` is the command; the APK is for
+      sideloaded pilot distribution only.
+- [ ] **The driver `applicationId` is settled.** It is still the generated
+      `com.saaradhigo.saaradhigo_driver` and can never be changed after the
+      first upload. See the recommendation in
+      `ci-and-release-prep-batch4-report.md`.
+- [ ] **Both keystores are backed up** off this machine, with
+      `credentials.txt`, somewhere a second person can reach. The build script
+      refuses to produce a signed artifact until
+      `SAARADHIGO_KEYSTORE_BACKUP_VERIFIED=yes` says this is done.
 
 ---
 
