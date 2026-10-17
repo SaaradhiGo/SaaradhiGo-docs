@@ -1,5 +1,43 @@
 # SaaradhiGo — India controlled-pilot readiness
 
+> ## Status: autonomous batch 6, 2026-10-17
+>
+> Read `android-pilot-autonomous-batch6-report.md` for the detail. In short:
+>
+> **Nine defects found and fixed**, each with a test that fails against the
+> previous code. Two were security findings not previously reported: the
+> Cashfree `payment_session_id` was written to logcat on every payment-order
+> creation, and the driver's push token was logged once the app began
+> registering rotated tokens. Both are fixed, in both apps, by substring
+> redaction with a structural test.
+>
+> One was a P0 functional defect: **a rider could not cancel a ride.** The app
+> sent no `reason`, the server refused with `INVALID_REASON`, and the app
+> cleared its local state anyway -- so the rider was shown "cancelled" while
+> the trip stayed live and a driver could still be dispatched to them.
+>
+> **Three rider capabilities now exist** that did not: support tickets (the
+> Help & Support screen had six tiles and no handlers), post-trip ratings
+> (neither app could submit one, so every driver average sat at its default),
+> and a notification error state distinct from an empty inbox. The driver can
+> now rate passengers.
+>
+> **The ride lifecycle is pinned to a generated contract**, 17 envelopes
+> captured from real views and asserted in both apps -- the same technique
+> that caught the `access`/`token` login defect, extended past authentication.
+> **28 object-authorization probes** confirm the boundaries hold.
+>
+> Local test state: backend 1,372 passed / 9 pre-existing Redis failures;
+> driver 449 passed, analyze clean; rider 249 passed, no analyze errors.
+> PostgreSQL concurrency tests and all CI are **UNKNOWN** -- no local
+> PostgreSQL, and this batch was committed but not pushed.
+>
+> The four owner-controlled blockers are unchanged: keystore backup
+> verification, Firebase credentials, a QA Maps key, and QA SES. Every push,
+> Maps and email row in the device checklist fails for want of one of them.
+
+
+
 Written for: the owner/CTO and the engineers who will clear these items.
 
 **Audited at:** backend `4228caf`, rider `69598ae`, driver `bae0a3e`, web `fcf56fc`,
