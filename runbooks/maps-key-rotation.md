@@ -28,9 +28,22 @@ SaaradhiGo-backend   0
 SaaradhiGo-docs      0
 ```
 
-So it is confined to the rider repo — but it is in the **public-facing history**
-of that repo and in any clone, fork, CI cache or APK ever built from it.
-Removing it from HEAD does not change that. **Rotation is the only fix.**
+**Re-scanned 2026-10-17 across every branch, local and remote. It is still
+live at the tip of:**
+
+```
+main                                origin/main
+dev                                 origin/dev
+ci/rider-app-pipeline               origin/ci/rider-app-pipeline
+fix/brand-consistency-saaradhigo    origin/fix/brand-consistency-saaradhigo
+                                    origin/srini_fixes_mobile
+```
+
+Two files on each. Only `feat/android-pilot-batch1` is clean, so **anyone
+building the rider app from `main` or `dev` today still ships this key** — and
+it is in the public history regardless, in any clone, fork, CI cache or APK
+ever built from it. Removing it from HEAD does not change that.
+**Rotation is the only fix.**
 
 ---
 
@@ -54,7 +67,8 @@ the harder ones.
 | Consumer | Key source | Status |
 |---|---|---|
 | **Backend** — Distance Matrix, geocode, reverse-geocode, place details, directions | `GOOGLE_MAPS_API_KEY` environment variable (`base/settings.py:724`), never in source | **QA has no such variable set.** Verified in the QA service's variable list |
-| **Driver app** — Maps SDK for Android | `${MAPS_API_KEY}` Gradle manifest placeholder, passed at build time | No key committed; empty by default |
+| **Driver app** (`origin/dev`, the recommended canonical app) — **none: it uses `flutter_map` over OSM** | n/a | Needs **no** Maps key |
+| **Driver app** (`feat/driver-app-rebuild`) — Maps SDK for Android | `${MAPS_API_KEY}` Gradle manifest placeholder, passed at build time | No key committed; empty by default |
 | **Rider app** | — | None needed |
 
 > **Finding worth acting on separately:** because QA has no
@@ -111,6 +125,22 @@ ID and to *Maps SDK for iOS*.
 Low risk, because nothing uses it. Do it in this order so there is never a
 window where a new key is unrestricted.
 
+0. **Verify there are no active dependencies first** — do not revoke
+   before this. From the repositories and the QA environment:
+
+   | Consumer | Uses a Maps key? | Evidence |
+   |---|---|---|
+   | Rider app | **No** — `flutter_map`/OSM; both call sites were dead | `pubspec.yaml`; `import GoogleMaps` with no Pod |
+   | Driver app (`origin/dev`) | **No** — `flutter_map` | `pubspec.yaml`; no `geo.API_KEY` in its manifest |
+   | Driver app (rebuild) | Yes, but build-time and empty by default | `build.gradle.kts` placeholder |
+   | Backend | `GOOGLE_MAPS_API_KEY` env only, never in source | `settings.py:724` |
+   | QA environment | **Variable not set at all** | QA service variable list |
+
+   So within these five repositories and QA, the compromised key has **no
+   active dependency**. That is a strong signal, not a proof — only the Cloud
+   console can show whether something outside these repos calls it, which is
+   step 1.
+
 1. **Confirm the blast radius in Cloud.** In *APIs & Services → Credentials*,
    find the key with that fingerprint. Check *Metrics* for the last 30 days.
    Expected: no traffic, or only historical traffic. **If it shows recent
@@ -159,5 +189,26 @@ window where a new key is unrestricted.
 
 `google-services.json` is left exactly as it is: that key is meant to ship.
 
+**Note:** these changes are on `feat/android-pilot-batch1` only. `main`,
+`dev` and three other branches still carry the key at their tips.
+
 **None of this reduces the exposure of `863b98dead568420`. Only step 4 above
 does.**
+
+---
+
+## 6. Fingerprints for the Android restriction (step 2)
+
+Upload-key SHA-1s from the keystores in `android-signing-setup.md`. Not
+secrets.
+
+| App | Package | Upload key SHA-1 |
+|---|---|---|
+| Rider | `com.deeptrics.saaradhigo` | `71:3A:45:6A:B2:C0:C4:FF:FF:43:FF:A6:E5:66:30:37:A2:D9:2B:1D` |
+| Driver | `com.saaradhigo.driver` | `94:1B:99:B0:32:51:CF:09:92:A3:AE:C3:C3:B5:8A:FD:60:27:51:0F` |
+
+⚠ **Under Play App Signing the fingerprint that matters at runtime is
+Google's app signing key, not the upload key above.** Add the app signing key
+SHA-1 from Play Console too, or the map is blank in production while working
+in every local build — the most common way Maps restrictions get
+misconfigured.
