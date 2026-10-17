@@ -1,5 +1,22 @@
 # QA external integrations — exact configuration to apply
 
+> ## Owner action list, with the check that proves each one
+> *(Re-verified 2026-10-17, batch 6. Nothing below was performed: all four
+> need consoles or credentials this environment does not have.)*
+>
+> | # | Action | The check that proves it |
+> |---|---|---|
+> | **1** | Back up both keystores **and** `credentials.txt` to a vault a second person can reach | Restore to a scratch dir on another machine, `keytool -list -v`, and match the SHA-1 in §1. A match proves the backup is the same key **and** that the stored password opens it. Then `export SAARADHIGO_KEYSTORE_BACKUP_VERIFIED=yes` |
+> | **2a** | Add a Firebase **Android app** for `com.saaradhigo.driver` to project `saaradhigo-4f8ad`; put its `google-services.json` in `SaaradhiGo-driver/android/app/` | `flutter build apk --debug` prints "google-services.json found — FCM is enabled for this build." The file is gitignored and the Gradle plugin applies only when present |
+> | **2b** | Create a **service account** with the Firebase Messaging role; set `FIREBASE_CREDENTIALS_JSON` on `backend` **and** `celery` | `manage.py shell -c "from servers.auth_user import services; print(bool(services.firebase_admin._apps))"` → `True`. Turns push on for the rider at the same time |
+> | **3** | Create a **restricted QA Maps *server* key** (not an Android key — the backend makes these calls) and set `GOOGLE_MAPS_API_KEY` on `backend` | One `curl` per proxy, five total: 200 with results. A **502 `API_ERROR`** means unset or that API not enabled; a 403 in the backend log means the restriction is too tight |
+> | **4** | SES: verify the sender domain with DKIM, create QA SMTP credentials, then apply the variables **allowlist first, credentials last** | `manage.py email_safety_check --to <qa> --to <non-qa>` between steps and again after. It sends nothing and prints no credential |
+>
+> Restrictions and quota figures for the Maps key, and the exact SES variable
+> order, are in §2 and §3 below. Do not create cloud resources, change billing
+> or provision secrets on the strength of this page alone — it is the
+> specification, not an authorisation.
+
 Everything on this page is an **owner action**. None of it was applied: it
 needs credentials and consoles this environment does not have, and applying
 Railway variables is a deployment.

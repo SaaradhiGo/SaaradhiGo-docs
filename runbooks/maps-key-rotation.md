@@ -106,6 +106,35 @@ changed, and two things are now firmer:
   `web/firebase-config.js` holds the literal string `AIzaSy-placeholder`, not
   a key.
 
+### Re-verified before recommending revocation, batch 6 (2026-10-17)
+
+Checked again, read-only, immediately before this recommendation:
+
+| Check | Result |
+|---|---|
+| `google_maps_flutter` in either app's pubspec or lockfile | **absent** (0 in both) |
+| `com.google.android.geo.API_KEY` in the driver manifest | **absent**, and asserted absent by a test |
+| Same in the rider manifest | present but **vestigial** — fed an empty Gradle placeholder, and the app renders with `flutter_map` over OSM |
+| `GOOGLE_MAPS_API_KEY` on `backend` (QA) | **absent** |
+| Same on `celery` (QA) | **absent** |
+| Same on `web` (QA) | **absent** — only `NEXT_PUBLIC_API_BASE_URL`, `NODE_ENV` |
+| Same on `SaaradhiGo-backend` (production) | **no variables at all** |
+| The exposed key in any file at HEAD, in all four repos | **absent** — the only `AIza` hits are assertion and documentation strings |
+
+**Conclusion: the exposed key has no active dependency anywhere this project
+controls, so revoking it breaks nothing.**
+
+The one thing still not checkable from here is a consumer **outside** this
+project — another Cloud project, a script, a spreadsheet add-on. The Cloud
+Console usage graph for the key answers that in one page, and it is the only
+step left before revocation.
+
+Note the separate key `338d92da324c` -- the Firebase Android key in the
+rider's `google-services.json` -- is still committed. That is how Firebase
+config is meant to ship, so it is not the same class of leak, but it needs an
+Android application restriction (package + SHA-1) or it can be spent from
+anywhere.
+
 ### Verified from the Railway service configuration, 2026-10-17
 
 Read-only; no values were requested and nothing was modified. The variable

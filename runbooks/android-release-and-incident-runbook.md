@@ -81,6 +81,43 @@ New apps have been App Bundle only since August 2021. The APK is for
 sideloaded pilot distribution; the `.aab` is what the Play Console takes. The
 signing guard covers `bundle` tasks as well as `assemble`, verified locally.
 
+### The base URLs each app needs, and why they differ
+
+Found during batch 6's release recheck: **the driver app's REST base URL had
+no `/api/v1`**, so every REST call in it resolved to an unrouted path and
+404d — login included. The prefix was known (a comment in
+`api_endpoints.dart` names the full route) and simply absent from the base,
+from `.env.example`, and from this script's QA target.
+
+The two apps use **opposite** conventions and are not interchangeable:
+
+| | REST base | WS base | Socket paths |
+|---|---|---|---|
+| **Driver** | must end `/api/v1/` | bare host, **no** `ws` | already carry `ws/…` |
+| **Rider** | must end `/api/v1` | ends `/ws` | do **not** carry `ws` |
+
+Copying one app's WS value to the other produces `/wsws/…`, which is exactly
+what happened to the driver's production WS value in this script. Both apps
+now carry a test that joins their base with real backend routes and asserts a
+served path, so neither can regress silently — and note that the ordinary unit
+tests cannot catch it: they stub the adapter and assert the path *relative to*
+the base, where the missing prefix is invisible.
+
+### Release build reproducibility
+
+The script is the reproducibility mechanism: the target name fixes the URLs,
+the opt-in, the artifact type and the signing source together. Reproducing a
+build means naming the same target on the same commit, not retyping four
+`--dart-define` flags from memory.
+
+What is **not** yet reproducible, and should be recorded per build until it is:
+
+- the Flutter and Dart SDK versions (`flutter --version`);
+- the commit SHA of each repo;
+- whether `google-services.json` was present (it changes whether FCM is
+  compiled in at all);
+- the `apksigner` output for each split.
+
 ### Verify the artifact rather than trusting the command
 
 The script prints the signer for every split it produces. Read it:
