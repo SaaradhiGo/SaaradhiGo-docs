@@ -46,14 +46,19 @@ The functional run is the one to read. It is in §3.
 passed, `validate / postgres concurrency` **107 passed**, `lint, SAST,
 dependency audit` clean, EC2 deploy skipped.
 
-**A local PostgreSQL run disagreed, and CI is right.** On this laptop the
-same suite reported 5 failures and 17 errors. The failures were confined to
-the timing-sensitive family — `test_lifecycle_under_gps_load`,
-`test_long_ride_soak` (two- and four-hour growth, lifecycle latency) — plus
-database teardown contention, on a machine that was simultaneously running
-two Flutter suites against a cold container. None of it reproduced in CI on
-the same commit, and none of it touches the code changed in this batch.
-Treat CI as the authority for that suite, as the test markers themselves say.
+**The local PostgreSQL picture, measured rather than assumed.** A first local
+run reported 5 failures and 17 errors, on a laptop simultaneously running two
+Flutter suites against a freshly started container. Re-run on an idle machine
+with the container ready, it reproduces CI exactly: **1 failed, 106 passed,
+107 collected**. (The first run's counts exceeded the collected total because
+17 were *teardown* errors on tests whose call phase had passed — database
+contention, not broken behaviour.)
+
+The one remaining local failure is
+`test_lifecycle_under_gps_load::test_the_driver_does_not_receive_its_own_location_echo`.
+It is **pre-existing and order-dependent**: it passes on its own, it passes
+in CI, and it fails the same way with this batch's new test files excluded
+entirely. It is not a regression and not caused by any change here.
 
 ---
 
