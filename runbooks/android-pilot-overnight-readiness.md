@@ -34,13 +34,26 @@ blocking the pilot is external: signing-key backup, Firebase, Maps key, SES.
 | Suite | Result |
 |---|---|
 | Backend, default runner | **1,454 passed**, 9 skipped |
-| Backend, `-m postgres` (PostgreSQL 15 in Docker) | see §6 note |
+| Backend, `-m postgres` | **107 passed in CI** on `aed14a7` (27 + 80). See the note below |
 | Backend `ruff` | clean |
 | Rider `flutter analyze` / `flutter test` | 0 errors (40 pre-existing infos) / **280 passed**, 7 skipped |
 | Driver `flutter analyze` / `flutter test` | **No issues found** / **459 passed** |
 | **Functional verification against deployed QA** | **20 PASS, 0 FAIL, 1 UNKNOWN** |
 
 The functional run is the one to read. It is in §3.
+
+**CI on `aed14a7`: all four jobs green** — `validate / test suite` 1,454
+passed, `validate / postgres concurrency` **107 passed**, `lint, SAST,
+dependency audit` clean, EC2 deploy skipped.
+
+**A local PostgreSQL run disagreed, and CI is right.** On this laptop the
+same suite reported 5 failures and 17 errors. The failures were confined to
+the timing-sensitive family — `test_lifecycle_under_gps_load`,
+`test_long_ride_soak` (two- and four-hour growth, lifecycle latency) — plus
+database teardown contention, on a machine that was simultaneously running
+two Flutter suites against a cold container. None of it reproduced in CI on
+the same commit, and none of it touches the code changed in this batch.
+Treat CI as the authority for that suite, as the test markers themselves say.
 
 ---
 
