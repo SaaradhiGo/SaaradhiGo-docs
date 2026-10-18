@@ -9,10 +9,34 @@ state and turns it into an ordered procedure.*
 
 | Repo | Branch | Head |
 |---|---|---|
-| backend | `feat/android-pilot-batch1` | `00e1eff` |
-| rider | `feat/android-pilot-batch1` | `9542b3e` |
+| backend | `feat/android-pilot-batch1` | `cfc721a` |
+| rider | `feat/android-pilot-batch1` | `88ebaeb` |
 | driver | `feat/driver-dev-hardening` | `8b6060d` |
 | docs | `docs/india-launch-readiness` | `5ea72b2` |
+
+> **Two corrections landed after this checklist was first written
+> (2026-10-17).** The rider's cash button now calls the server and verifies
+> the result before navigating, and the `0006_email_identity` migration now
+> pre-checks over-long addresses. Both are reflected in gate 5, §2.1 and
+> steps 16–16c below. Everything else here remains unexecuted: it still
+> needs consoles, credentials, a deployment or a phone.
+
+**Verification run for those two corrections (2026-10-17):**
+
+| Suite | Result |
+|---|---|
+| Backend, default runner | **1,441 passed**, 9 skipped (was 1,417 + the 24 new tests) |
+| Backend, `-m postgres` | **106 of 107 passed** against PostgreSQL 15 in Docker |
+| Rider `flutter test` | **280 passed**, 7 pre-existing skips |
+| Rider `flutter analyze` | 0 errors; the 40 pre-existing infos, unchanged |
+
+The one PostgreSQL failure is
+`test_lifecycle_under_gps_load.py::test_the_driver_does_not_receive_its_own_location_echo`.
+It is **pre-existing and order-dependent, not a regression**: it passes on its
+own, it passes alongside the new migration tests, and it fails the same way
+with the new test file excluded entirely. CI is the authority on that suite --
+it reported all 102 postgres tests green before this batch. Do not read it as
+a signal about these corrections.
 
 ---
 
@@ -203,13 +227,24 @@ created.
 gateway. Enabling even sandbox Cashfree carries cost and live-payment
 adjacency, and is not required to certify the ride lifecycle.
 
-**A known limitation to expect on the phone, not to debug:** the rider's
-*"Pay with Cash instead?"* button navigates to the rating screen. It does
-**not** call `POST /payments/switch/` with `new_method: cash`, so the payment
-row stays `pending` server-side. The trip still completes and the receipt
-still issues — receipts are triggered by trip completion, not by payment
-settlement. Closing that gap is a feature change and is deliberately out of
-scope here.
+**Cash now settles properly (corrected 2026-10-17).** The two defects that
+made the cash path cosmetic are fixed, so the acceptance test below exercises
+a real settlement rather than a screen change:
+
+- The rider's *"Pay with Cash instead?"* button used to be
+  `context.push('/rate-driver')` and nothing else — no API call at all. It now
+  calls `POST /payments/switch/`, reads the trip back, and only then decides
+  where the rider goes. A refusal or an unanswered request keeps them on the
+  payment screen with the fare still showing.
+- The server's cash branch wrote the replacement payment as
+  `method='wallet'`, which the driver's cash-confirmation handler could not
+  find — so the driver got *"No cash payment found for this trip"* and the
+  fare could never settle. It now writes `method='cash', status='pending'`.
+
+**What to expect on the phone:** choosing cash is *not* payment. The trip
+carries a **pending** cash payment until the **driver** confirms collection,
+which is a separate step in the test below. A rider who is shown the rating
+screen after a *failed* cash switch is a regression, not a quirk.
 
 **Stop if.** Anyone proposes putting production Cashfree credentials on QA.
 
@@ -227,24 +262,36 @@ The release carries **exactly one** new migration:
 | Model changes with no migration | **none** — `makemigrations --check` reports "No changes detected" |
 | Other apps' migrations vs `dev` | **none** — one file in the whole diff |
 | Reverse defined | **yes** — the `RunPython` has an explicit no-op reverse |
-| Reverse actually executed | **yes** — applied 0005 → 0006 → 0005 on a scratch DB, `Unapplying … OK` (SQLite; the Postgres reverse only widens the column back, which cannot fail) |
+| Reverse actually executed | **yes, on PostgreSQL 15** — `tests/test_email_identity_migration.py::TestOnPostgres` migrates 0006 → 0005 → 0006 and asserts the column width and the unique index against the database each way |
 
 What it does: lower-cases existing addresses, adds a nullable
 `email_verified_at`, narrows `email` from `varchar(256)` to `varchar(254)`,
 and adds a case-insensitive partial unique index.
 
-**Two ways it can fail — one guarded, one not:**
+**Two ways it can fail — both now guarded (corrected 2026-10-17):**
 
-1. **Duplicate addresses — guarded.** The migration refuses with a
-   `RuntimeError` naming the count and the account ids but never the
-   addresses, so a deployment log does not become a list of customer emails.
-   Which account keeps an address is a support decision — one of them may hold
-   a wallet balance — so it is deliberately not automatic.
-2. **An address longer than 254 characters — NOT guarded.** The narrowing
-   fails with a raw `value too long for type character varying(254)` from
-   Postgres. The migration does not pre-check length.
+1. **Duplicate addresses.** The migration refuses with a `RuntimeError`
+   naming the count and the account ids but never the addresses, so a
+   deployment log does not become a list of customer emails. Which account
+   keeps an address is a support decision — one of them may hold a wallet
+   balance — so it is deliberately not automatic.
+2. **An address longer than 254 characters.** This was unguarded and is the
+   second correction in this batch. A stored 255- or 256-character address is
+   legal in the column as it stands, and the narrowing failed with a raw
+   `value too long for type character varying(254)` inside
+   `preDeployCommand`. Confirmed against PostgreSQL 15 rather than assumed.
+   The pre-check now reports it with the count, the longest length and the
+   account ids — and reports it *together* with any duplicates, so one run
+   tells you everything to fix.
 
-Run both read-only checks **before** deploying:
+The pre-check also now **checks first and writes after**: normalisation used
+to run before the duplicate check, so a refused migration had already
+modified data.
+
+The two read-only checks below are therefore no longer load-bearing — the
+migration will refuse safely on its own. They are still worth two minutes,
+because seeing the problem before the deploy window is cheaper than seeing it
+inside one:
 
 ```sql
 SELECT lower(email) AS e, count(*) FROM auth_user_customuser
@@ -256,7 +303,9 @@ SELECT count(*) FROM auth_user_customuser WHERE length(email) > 254;
 **Expect.** Zero rows, and `0`.
 
 **Stop if.** Either returns anything. Clear or shorten the offending addresses
-first; do not deploy and discover it in `preDeployCommand`.
+first. If you skip these checks and deploy anyway, the migration refuses with
+a message naming the account ids and the deployment aborts cleanly — that is
+now a safe failure rather than a raw database error.
 
 **Why a failure here is survivable anyway:** QA `backend` runs
 `preDeployCommand: python manage.py migrate --noinput`. A failed pre-deploy
@@ -378,7 +427,10 @@ Two safety pre-checks before starting:
 | 13 | Re-book, driver arrives, starts the trip | Live tracking on both sides | — |
 | 14 | **SOS** during the trip | Ops push; SOS recorded | An SMS reaches anyone unexpected → the pre-check above was skipped |
 | 15 | Driver completes the trip | Rider sees the payment screen with the correct fare | — |
-| 16 | **Payment** — tap *"Pay with Cash instead?"* | The rating screen opens. The payment stays `pending` server-side — **expected**, see gate 5 | — |
+| 16 | **Payment** — rider taps *"Pay with Cash instead?"* | A message naming the amount to hand over, then the rating screen. Server-side the trip is now `payment_method: cash`, `payment_status: pending` | The rating screen opens with no message, or after an error — the switch is not being verified |
+| 16a | Repeat step 16 with the phone in airplane mode | The rider **stays** on the payment screen and is told the trip has not been paid | They are moved on — a failed switch is being treated as a payment |
+| 16b | **Driver confirms cash collection** | The trip moves to `payment_status: completed`; the driver's earnings reflect it once | *"No cash payment found for this trip"* — the `method='cash'` fix is not in the deployed build |
+| 16c | Driver confirms a second time | Idempotent: reported as already confirmed, and GMV is **not** double-counted | A second confirmation adds earnings again |
 | 17 | Rider rates the driver | Accepted once; a second attempt is settled, not an error | — |
 | 18 | **Receipt** | Email with PDF arrives for the allowlisted rider within ~2 min (Celery) | Nothing after 5 min → check the `celery` log, then gate 4 |
 | 19 | **KYC** — driver uploads a document | Upload succeeds to S3; status moves to pending review | — |
@@ -388,6 +440,11 @@ Two safety pre-checks before starting:
 Steps 4 and 7–9 are the **DEVICE UNKNOWN** items from §0 and are the reason
 this test exists. Everything else in it is already software-verified and is
 here to catch an integration or configuration mistake, not a logic defect.
+
+Steps 16–16c are the exception worth naming: the cash path was corrected on
+2026-10-17 and its tests are **SOFTWARE-VERIFIED** (21 rider tests, 12
+backend), but no device has walked it end to end, and the driver-side
+confirmation in 16b crosses the trip WebSocket, which no unit test exercises.
 
 ---
 
@@ -400,3 +457,10 @@ here to catch an integration or configuration mistake, not a logic defect.
 - No real customer SMS, email or push. Test numbers and the allowlist are how that is enforced — do not widen either to make a step pass.
 - No secret pasted into a ticket, a log or a chat in order to "check" it.
 - Do not remove the Railway watch patterns; suppressed autodeploy is a safety property.
+- Do not set Cashfree credentials to "make the payment step pass". The
+  acceptance test settles in cash by design; online settlement stays
+  unexercised on QA.
+- Stop if a rider is ever moved off the payment screen by a cash switch that
+  did not succeed, or if a driver cannot confirm collection for a trip the
+  rider switched to cash. Both are the defects corrected on 2026-10-17
+  reappearing, and both mean a fare that silently never settles.
