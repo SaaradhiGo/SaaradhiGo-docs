@@ -154,7 +154,7 @@ does not call these routes.
 
 ```bash
 curl -s -X POST "$QA_API/ride/maps/geocode" -H "Authorization: Bearer $QA_TOKEN" \
-     -H 'Content-Type: application/json' -d '{"search_text":"Koramangala"}' | head -c 300
+     -H 'Content-Type: application/json' -d '{"input":"Koramangala"}' | head -c 300
 ```
 
 then `place-details`, `reverse-geocode`, `directions`.

@@ -177,10 +177,29 @@ is a deployment, so it waits for the deploy gate.
 ```bash
 # One request per API. Five calls total, well inside any free tier.
 curl -s -X POST "$QA_API/ride/maps/geocode" -H "Authorization: Bearer $QA_TOKEN" \
-     -H 'Content-Type: application/json' -d '{"search_text":"Koramangala"}' | head -c 300
+     -H 'Content-Type: application/json' -d '{"input":"Koramangala"}' | head -c 300
 ```
 
-Repeat for `place-details`, `reverse-geocode` and `directions`. A 200 with
+Repeat for `place-details`, `reverse-geocode` and `directions`.
+
+**The exact field each proxy requires** — verified against the deployed QA
+backend on 2026-10-18, because the command above previously used
+`search_text`, which these views do not read. That returned `400
+MISSING_FIELDS` regardless of the key, so the check would have failed even
+with a correctly configured key and sent you hunting the wrong problem.
+
+| Route | Required JSON | Optional |
+|---|---|---|
+| `maps/geocode` | `{"input": "Koramangala"}` | `location` |
+| `maps/place-details` | `{"place_id": "ChIJ..."}` | `session_token` |
+| `maps/reverse-geocode` | `{"lat": 17.4450, "lng": 78.3800}` | — |
+| `maps/directions` | `{"origin_lat":…, "origin_lng":…, "dest_lat":…, "dest_lng":…}` | — |
+
+All four were confirmed on QA to return **HTTP 502 `API_ERROR`** with no key
+set, logging `GOOGLE_MAPS_API_KEY is not set.` — a clean degradation, not a
+500. The rider app sends exactly these field names (`location_service.dart`),
+so app and backend agree; only this page was wrong.
+ A 200 with
 results means the key and the API restriction are right; a **502 `API_ERROR`**
 means the key is unset or that API is not enabled; a 403 from Google (visible
 in the backend log) means the restriction is too tight.

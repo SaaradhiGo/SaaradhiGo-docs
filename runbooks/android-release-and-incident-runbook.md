@@ -148,7 +148,7 @@ print('firebase initialised:', bool(services.firebase_admin._apps))"
 
 # 3. Maps: one request per proxy. Five calls, not a loop.
 curl -s -X POST "$QA_API/ride/maps/geocode" -H "Authorization: Bearer $QA_TOKEN" \
-     -H 'Content-Type: application/json' -d '{"search_text":"Koramangala"}' | head -c 200
+     -H 'Content-Type: application/json' -d '{"input":"Koramangala"}' | head -c 200
 #    repeat for place-details, reverse-geocode, directions
 
 # 4. Migrations
