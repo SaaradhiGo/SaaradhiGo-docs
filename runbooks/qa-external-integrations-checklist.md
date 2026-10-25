@@ -233,7 +233,7 @@ cannot be undone, because the mail has already left.
 | 3 | `EMAIL_BACKEND` | `django.core.mail.backends.smtp.EmailBackend` |
 | 4 | `EMAIL_HOST` | `email-smtp.ap-south-1.amazonaws.com` |
 | 5 | `EMAIL_PORT` / `EMAIL_USE_TLS` | `587` / `True` |
-| 6 | `DEFAULT_FROM_EMAIL` | `no-reply@qa.saaradhigo.in` |
+| 6 | `DEFAULT_FROM_EMAIL` | `no-reply@qa.saaradhigo.com` |
 | **7** | `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | QA SMTP credentials — **last** |
 
 Both the `backend` and `celery` services need these: receipts are sent from a
@@ -257,7 +257,7 @@ rather than debugging it.
 
 ### AWS-side prerequisites
 
-Verify `saaradhigo.in` (ideally `qa.saaradhigo.in` too) with DKIM, create
+Verify `saaradhigo.com` (ideally `qa.saaradhigo.com` too) with DKIM, create
 **separate** SMTP credentials for QA and production, add SPF/DMARC and a
 bounce destination, and request production access for the **production**
 identity only. QA stays in the SES sandbox, which is a second layer on top of

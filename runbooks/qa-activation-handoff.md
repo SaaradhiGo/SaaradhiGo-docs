@@ -186,7 +186,7 @@ SES sandbox. Then set the Railway variables on **both** `backend` and
 3. `EMAIL_BACKEND` = `django.core.mail.backends.smtp.EmailBackend`
 4. `EMAIL_HOST` = `email-smtp.ap-south-1.amazonaws.com`
 5. `EMAIL_PORT` = `587`, `EMAIL_USE_TLS` = `True`
-6. `DEFAULT_FROM_EMAIL` = `no-reply@qa.saaradhigo.in`
+6. `DEFAULT_FROM_EMAIL` = `no-reply@qa.saaradhigo.com`
 7. `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` — **last**
 
 The order *is* the safety. Credentials before the allowlist opens a window in
@@ -381,8 +381,8 @@ with `ALLOW_NON_PRODUCTION_HOST=true` and the QA banner. Install the
 |---|---|---|
 | applicationId | `com.deeptrics.saaradhigo` *(unchanged — never change a shipped id)* | `com.saaradhigo.driver` |
 | dart-define | `BASE_URL` / `WS_BASE_URL` | `API_BASE_URL` / `WS_BASE_URL` |
-| QA REST | `https://dev.api.saaradhigo.in/api/v1` | `https://dev.api.saaradhigo.in/api/v1/` |
-| QA WS | `wss://dev.api.saaradhigo.in/ws` | `wss://dev.api.saaradhigo.in/` |
+| QA REST | `https://backend-qa-811d.up.railway.app/api/v1` | `https://backend-qa-811d.up.railway.app/api/v1/` |
+| QA WS | `wss://backend-qa-811d.up.railway.app/ws` | `wss://backend-qa-811d.up.railway.app/` |
 
 The two apps use **opposite** WebSocket conventions: the rider's base carries
 `/ws` and its paths do not; the driver's paths carry `ws/` and its base must

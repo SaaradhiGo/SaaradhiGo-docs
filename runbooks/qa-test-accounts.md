@@ -128,7 +128,7 @@ Set on the `backend` service (and later production):
 | `EMAIL_HOST_USER` | SES SMTP username |
 | `EMAIL_HOST_PASSWORD` | SES SMTP password |
 | `EMAIL_USE_TLS` | `True` |
-| `DEFAULT_FROM_EMAIL` | e.g. `no-reply@saaradhigo.in` |
+| `DEFAULT_FROM_EMAIL` | e.g. `no-reply@saaradhigo.com` |
 
 SES is the natural choice — the stack already uses SES for SMS — and it needs
 a **verified sender domain**, which only the owner can do. Note that applying

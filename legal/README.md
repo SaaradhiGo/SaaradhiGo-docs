@@ -41,12 +41,12 @@ Replace before publishing.
 | `{{REGISTERED_ADDRESS}}` | Full address as on incorporation | Registered office |
 | `{{PRINCIPAL_OFFICE_ADDRESS}}` | Operating office | If different from registered |
 | `{{GSTIN}}` | "36ABCDE1234F1Z5" | After GST registration |
-| `{{SUPPORT_EMAIL}}` | "support@saaradhigo.in" | |
+| `{{SUPPORT_EMAIL}}` | "support@saaradhigo.com" | |
 | `{{SUPPORT_PHONE}}` | "+91-40-XXXXXXXX" | |
 | `{{GRIEVANCE_OFFICER_NAME}}` | Founder or compliance hire | IT Act requirement |
-| `{{GRIEVANCE_OFFICER_EMAIL}}` | "grievance@saaradhigo.in" | |
+| `{{GRIEVANCE_OFFICER_EMAIL}}` | "grievance@saaradhigo.com" | |
 | `{{DPO_NAME}}` | Data Protection Officer | DPDP requirement |
-| `{{DPO_EMAIL}}` | "dpo@saaradhigo.in" | |
+| `{{DPO_EMAIL}}` | "dpo@saaradhigo.com" | |
 | `{{JURISDICTION_CITY}}` | "Hyderabad" | Disputes jurisdiction |
 | `{{LAUNCH_DATE}}` | YYYY-MM-DD | Effective date |
 | `{{POLICY_VERSION}}` | "1.0" | Increment on every change |

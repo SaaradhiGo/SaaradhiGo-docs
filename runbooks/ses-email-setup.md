@@ -49,7 +49,7 @@ new code.
 | `EMAIL_HOST_USER` | SES **SMTP** username |
 | `EMAIL_HOST_PASSWORD` | SES **SMTP** password |
 | `EMAIL_USE_TLS` | `True` |
-| `DEFAULT_FROM_EMAIL` | `no-reply@saaradhigo.in` |
+| `DEFAULT_FROM_EMAIL` | `no-reply@saaradhigo.com` |
 
 > SES SMTP credentials are **not** your IAM access keys. They are generated in
 > the SES console ("Create SMTP credentials"), which creates an IAM user with
@@ -69,7 +69,7 @@ touching the keys that S3 and SNS depend on.
 
 ## 3. AWS-side prerequisites (owner only)
 
-1. **Verify the sending domain** `saaradhigo.in` in SES, in the same region
+1. **Verify the sending domain** `saaradhigo.com` in SES, in the same region
    you will send from. Add the DKIM CNAMEs and the SPF/MAIL FROM records.
    A verified *domain* is better than a verified address: it lets you send as
    `no-reply@`, `support@` and `receipts@` without re-verifying each.
@@ -96,12 +96,12 @@ Three independent layers. The first is the one this repo owns.
 whenever `ENVIRONMENT != 'production'` **and** the backend actually delivers.
 
 ```
-AUTH_EMAIL_ALLOWLIST="qa@deeptrics.com,@saaradhigo.in"
+AUTH_EMAIL_ALLOWLIST="qa@deeptrics.com,@saaradhigo.com"
 ```
 
 - Entries starting with `@` match a whole domain.
-- Matching is case-insensitive; `@saaradhigo.in` does **not** match
-  `evilsaaradhigo.in` or `saaradhigo.in.example.com`.
+- Matching is case-insensitive; `@saaradhigo.com` does **not** match
+  `evilsaaradhigo.com` or `saaradhigo.com.example.com`.
 - **An empty allowlist on a delivering non-production deployment blocks every
   message.** The safe default for "we do not yet know who we may write to" is
   nobody.
@@ -126,7 +126,7 @@ both fail before a customer is emailed.
 
 ### Layer 3 — a separate SES identity for QA
 
-Ideally a different subdomain (`qa.saaradhigo.in`) so QA volume and bounces
+Ideally a different subdomain (`qa.saaradhigo.com`) so QA volume and bounces
 never affect the production sending reputation.
 
 ### QA variable set
@@ -138,7 +138,7 @@ never affect the production sending reputation.
 | `EMAIL_PORT` | `587` |
 | `EMAIL_USE_TLS` | `True` |
 | `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | QA SMTP credentials |
-| `DEFAULT_FROM_EMAIL` | `no-reply@qa.saaradhigo.in` |
+| `DEFAULT_FROM_EMAIL` | `no-reply@qa.saaradhigo.com` |
 | `AUTH_EMAIL_ALLOWLIST` | `@deeptrics.com` (or the specific QA addresses) |
 | `ENVIRONMENT` | must **not** be `production` |
 
@@ -199,7 +199,7 @@ The API is fully exercisable; only the delivery leg is missing.
    someone@gmail.com` → reports that it can send, that the QA address is
    allowed and the other is refused. Do this first; it sends nothing.
 1. `manage.py shell -c "from django.core.mail import send_mail;
-   send_mail('t','t','no-reply@qa.saaradhigo.in',['qa@deeptrics.com'])"` →
+   send_mail('t','t','no-reply@qa.saaradhigo.com',['qa@deeptrics.com'])"` →
    arrives.
 
    > **This call bypasses the allowlist.** `send_mail` is Django's own API;
@@ -225,7 +225,7 @@ The API is fully exercisable; only the delivery leg is missing.
 
 | # | Action |
 |---|---|
-| 1 | Verify `saaradhigo.in` (and ideally `qa.saaradhigo.in`) in SES, with DKIM |
+| 1 | Verify `saaradhigo.com` (and ideally `qa.saaradhigo.com`) in SES, with DKIM |
 | 2 | Create SMTP credentials — **separate** ones for QA and production |
 | 3 | Request production access for the **production** identity only |
 | 4 | Set the QA variables in §4, including `AUTH_EMAIL_ALLOWLIST` |
