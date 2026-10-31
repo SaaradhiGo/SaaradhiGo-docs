@@ -30,15 +30,17 @@ launch day. Engineering sets them via `VehicleFarePricing` rows + env vars.
 | Minimum fare (₹) | 40 | 70 | 100 | 150 |
 | Night-surge multiplier (11pm–5am) | 1.25 | 1.25 | 1.25 | 1.25 |
 | Maximum surge multiplier (any cause) | 1.50 | 1.50 | 1.50 | 1.50 |
-| **Platform commission (% of gross fare)** | **18%** | **18%** | **20%** | **20%** |
+| **Platform commission (% of gross fare)** | **15%** | **15%** | **15%** | **15%** |
 | Cancellation fee (rider, post-acceptance + 60s OR post-arrival wait) | 25 | 25 | 50 | 75 |
 | Driver compensation on rider no-show | 25 | 25 | 50 | 75 |
 | Waiting charge after no-fare window (₹/min, post-3 min wait) | 1.50 | 1.50 | 2.00 | 2.50 |
 | Toll / parking | Pass-through to rider at actual + 0% |
 
-`PLATFORM_COMMISSION_PERCENT` env var — set to `20`. The category-level
-override (`18%` for auto and hatchback) is configured in
-`VehicleFarePricing.platform_commission_percent` per row.
+**Commission.** The default platform commission is **15%** of the gross
+fare. It is configurable per country, city and vehicle class. Every change
+is versioned and goes through maker-checker approval, and drivers get
+advance notice of any increase (see "Pricing change governance"). The
+15% default is a rule in the commission matrix, not a code constant.
 
 ---
 
@@ -78,9 +80,9 @@ drive the fare.
 | **Total fare (incl. taxes)** | **₹374** |
 | GST (5% on ₹324, AC taxi, no ITC; tolls excluded) | ₹16.20 |
 | **Rider pays** | **₹390.20** |
-| SaaradhiGo commission (20% of ₹324) | ₹64.80 |
+| SaaradhiGo commission (15% of ₹324) | ₹48.60 |
 | TDS u/s 194O (1% of gross ₹324) | ₹3.24 |
-| **Driver receives** | **₹305.96 (after commission, TDS) + ₹50 toll pass-through** = **₹355.96** |
+| **Driver receives** | **₹272.16 (after commission, TDS) + ₹50 toll pass-through** = **₹322.16** |
 
 ### Example 2 — Madhapur to Gachibowli (auto, 6 km / 20 min, evening 1.2× surge)
 
@@ -97,9 +99,9 @@ drive the fare.
 | **Total fare (incl. taxes)** | **₹158.40** |
 | GST (NIL on auto-rickshaw fare via aggregator) | 0 |
 | **Rider pays** | **₹158.40 → ₹159 (rounded up)** |
-| SaaradhiGo commission (18% of ₹158.40) | ₹28.51 |
+| SaaradhiGo commission (15% of ₹158.40) | ₹23.76 |
 | TDS u/s 194O (1% of gross ₹158.40) | ₹1.58 |
-| **Driver receives** | **₹128.31** |
+| **Driver receives** | **₹133.06** |
 
 ### Example 3 — Late-night Shamshabad airport pickup (sedan, 28 km / 50 min, night surge 1.25×)
 
@@ -115,9 +117,9 @@ drive the fare.
 | **Total fare (incl. taxes)** | **₹905** |
 | GST (5% on ₹795) | ₹39.75 |
 | **Rider pays** | **₹944.75 → ₹945 (rounded up)** |
-| SaaradhiGo commission (20% of ₹795) | ₹159 |
+| SaaradhiGo commission (15% of ₹795) | ₹119.25 |
 | TDS u/s 194O (1% of gross ₹795) | ₹7.95 |
-| **Driver receives** | **₹628.05 + ₹110 pass-through = ₹738.05** |
+| **Driver receives** | **₹667.80 + ₹110 pass-through = ₹777.80** |
 
 ---
 
@@ -186,8 +188,9 @@ and a regulatory risk.
 
 ## Driver incentives (recommended Phase-0 acquisition spend)
 
-The platform earns ~18-20% commission, and competitors will pay drivers
-better in the short term to crowd you out. To onboard the first 100-200
+The platform's default commission is 15% (configurable per country, city
+and vehicle class). Competitors may pay drivers more in the short term, so
+launch incentives matter. To onboard the first 100-200
 drivers in 30-60 days, recommend:
 
 | Incentive | Phase-0 default |
@@ -196,7 +199,7 @@ drivers in 30-60 days, recommend:
 | **Weekly target bonus** | ₹500 for 30 trips in a week with ≥95% acceptance and ≥4.2 rating |
 | **Peak-hour incentive** | +₹15 flat per trip during 8-10am and 6-9pm weekdays |
 | **Referral bonus (driver-to-driver)** | ₹1,000 to the referrer when the referee completes 50 trips |
-| **First-month commission discount** | 0% commission for the first 30 days of operation (after that, standard 18%/20%) |
+| **First-month commission discount** | 0% commission for the first 30 days of operation (after that, the standard commission applies: 15% by default) |
 
 **Budget:** at 100 drivers × ~₹2,500 average bonus per driver in month 1 =
 ₹2.5 lakh allocation. Plan for ₹10-15 lakh acquisition spend for the
@@ -342,10 +345,10 @@ If the database is fresh (no legacy `VehicleFarePricing` rows), the
 
 | Vehicle type | Base | Per km | Per min | Min fare | Night surge | Commission |
 |---|---|---|---|---|---|---|
-| auto       | ₹30  | ₹12 | ₹1.50 | ₹40  | 1.25× | 18% |
-| hatchback  | ₹45  | ₹14 | ₹2.00 | ₹70  | 1.25× | 18% |
-| sedan      | ₹60  | ₹17 | ₹2.50 | ₹100 | 1.25× | 20% |
-| suv        | ₹100 | ₹23 | ₹3.00 | ₹150 | 1.25× | 20% |
+| auto       | ₹30  | ₹12 | ₹1.50 | ₹40  | 1.25× | 15% |
+| hatchback  | ₹45  | ₹14 | ₹2.00 | ₹70  | 1.25× | 15% |
+| sedan      | ₹60  | ₹17 | ₹2.50 | ₹100 | 1.25× | 15% |
+| suv        | ₹100 | ₹23 | ₹3.00 | ₹150 | 1.25× | 15% |
 
 These numbers can be edited row-by-row from Django admin. The MVA
 2020 1.50× surge cap is applied per row -- `surge_cap_multiplier`
