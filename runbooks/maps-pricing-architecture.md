@@ -101,6 +101,32 @@ dynamic maps  0.4×1.4 = 0.56× $2.10/1000 = $0.00118
 Before the Distance Matrix cache it was **$0.0166 (≈₹1.46)**. The fix removes ~38% of
 marginal Maps spend.
 
+### Measured after the cost fixes M1–M5 (2026-11-05)
+
+Prices re-checked on Google's India price list on **2026-11-05** (USD per 1,000, first paid tier).
+The backend test `tests/test_maps_call_budget.py` simulates one booking: 2 searches, a quote for
+6 vehicle types at once, accept, and 300 driver pings. It measures **3 billable calls**:
+
+| Call | Per attempt | SKU | India free / month | India price |
+|---|---|---|---|---|
+| Autocomplete with a session token | 2 searches | Autocomplete Session Usage | unlimited | free |
+| Place Details (pickup, drop) | 2 | **Place Details Pro**¹ | 35,000 | $5.10 |
+| Route for the quote, shared by the map and the planned route | 1 | Compute Routes Pro (TRAFFIC_AWARE) | 35,000 | $3.00 |
+| Driver location pings | 0 | the apps refetch only when >150 m off-route and ≥60 s since the last fetch (M1) | — | — |
+| Mobile map display | — | Maps SDK | unlimited | free |
+
+Marginal cost per completed ride (A = 1.4 attempts, above the free tiers): details 2.8 × $5.10 +
+route 1.4 × $3.00 = **$0.0185 per ride** (about ₹1.6 at about ₹87/$). If details drop to Essentials¹,
+it is **$0.0084**.
+
+¹ *Not confirmed:* our field mask asks for `displayName`. Google's field-to-SKU table puts that field
+in Pro, so details likely bill as Pro ($5.10) instead of Essentials ($1.50). Check the billing
+report. Dropping `displayName` would move details to Essentials.
+*Not confirmed:* (a) the 3-call figure comes from the simulated test, not from a real QA billing
+report, so check the per-SKU counter on the Integrations screen after a real trip; (b) each driver
+leg that has no stored route costs one more Routes call (driver app, M1), up to 4 per trip;
+(c) the INR rate is approximate.
+
 ### Monthly cost by volume (expected case, India rates, free tiers applied)
 
 | Completed rides/day | /month | Monthly Maps cost | Per completed ride | Per booking attempt |
