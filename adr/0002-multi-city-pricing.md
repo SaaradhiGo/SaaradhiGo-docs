@@ -4,7 +4,7 @@
 * Date: 2026-05-20
 * Deciders: Architect, Founder
 * Supersedes: none
-* Superseded by: none
+* Superseded by: none (the 1.5× rule is amended by [ADR-0008](0008-mvag-2025.md): the cap is now the lowest of the rate card, the state and the country, with a floor)
 
 ## Context
 

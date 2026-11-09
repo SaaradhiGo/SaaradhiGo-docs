@@ -717,7 +717,9 @@ We standardise on **Riverpod 3** across both apps. The current hybrid Provider +
 
 ## 11. Compliance architecture
 
-### 11.1 MV Aggregator Rules 2020 (MoRTH)
+### 11.1 MV Aggregator Guidelines 2025 (MoRTH)
+
+The 2025 guidelines replace 2020's. Every value below is config per country and state (`pricing.MarketRegulation`), never a literal: see [ADR-0008](adr/0008-mvag-2025.md).
 
 | Requirement                                        | Implementation                                                      |
 | -------------------------------------------------- | ------------------------------------------------------------------- |
@@ -725,7 +727,12 @@ We standardise on **Riverpod 3** across both apps. The current hybrid Provider +
 | Driver background verification + police verification | `Driver.police_verification_status` + KYC approval gate           |
 | Vehicle insurance / permit / fitness / PUC validity| Per-vehicle expiry fields + daily Celery job + auto-block on expiry |
 | Driver fatigue cap (12 hours active in 24h)        | `DriverSession` ledger + `servers.driver.fatigue.get_fatigue_status` + accept-time gate in `consumers._accept_trip`. Lockout stored on `Driver.fatigue_lockout_until` for O(1) checks. |
-| Surge cap (max 1.5× base)                          | Per-zone `RateCard.surge_cap_multiplier`, enforced centrally in `pricing.services.quote_fare` (see [ADR-0002](adr/0002-multi-city-pricing.md)) |
+| Dynamic fare band (0.5× to 2× of the base fare; state values) | Lowest cap of rate card, state and country, highest floor of state and country, applied in `pricing.services.quote_fare`. Hyderabad keeps its 1.5× card cap; Telangana unset until notified ([ADR-0002](adr/0002-multi-city-pricing.md), [ADR-0008](adr/0008-mvag-2025.md)) |
+| Fare calculation disclosed                         | Quote, estimate and receipt show the base fare, "Higher demand" / "Lower demand" with the multiplier, the tax and the total |
+| Own-vehicle driver keeps at least 80%              | India `CommissionCountryConfig.max_percent` 20; lower-only `CommissionStateCap`; active rules above a cap raise a critical alert, never changed silently |
+| Cancellation fee (10% of the fare, at most ₹100, both sides) | `ride.cancellation_penalty`: rider fee due on the next trip and paid to the driver let down; driver fee a ledger debit; safety, other-side no-show and the free window exempt |
+| Driver health and term insurance, induction training | `Driver` fields + `driver.records`; gate per market, off until operations is ready; same daily sweeper as vehicle documents |
+| AIS-140 tracker, panic button                      | Recorded per vehicle (`ais140_*`, `panic_button_*`); no gate yet |
 | Fare receipts (CGST §31)                           | `Receipt` model + `servers.ride.receipts.issue_receipt` (HTML email via SES on trip-complete; resend endpoint at `/api/v1/ride/trip/<id>/receipt/resend/`). PDF generation deferred to Phase-1. |
 | Notification opt-in / opt-out (DPDP)               | `NotificationPreference` model with marketing/promo default OFF; safety + transactional + payout categories cannot be turned off; dispatch via `servers.rider.notifications.create_notification`. |
 | Driver-side cancellation policy                    | `DriverCancellation` ledger + rolling 24h counter; 3 cancels → 1h online lockout (shares `Driver.fatigue_lockout_until`) + 0.1 rating decrement. Endpoint: `/api/v1/ride/trip/<id>/driver-cancel/`. |
