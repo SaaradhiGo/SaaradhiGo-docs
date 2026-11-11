@@ -26,6 +26,15 @@ Business + legal artefacts required before the Hyderabad pilot can go live:
 | [legal/credits-policy.md](legal/credits-policy.md) | VahanGo Credits (closed-loop credit balance) — non-transferable, non-cashable, ₹2,000 cap, 12-month expiry. Frames credits as not-a-PPI for RBI purposes; see [ADR-0003](adr/0003-closed-loop-wallet.md). |
 | [business/pricing-phase-0.md](business/pricing-phase-0.md) | Phase-0 fare schedule (auto/hatchback/sedan/SUV), surge cap, cancellation policy, commission split, incentive + promo budgets, KPI watchlist. |
 
+## Branches and environments
+
+| Branch | Deploys to | Takes changes from |
+|---|---|---|
+| `develop` (`dev` in the backend, driver and rider app repos) | QA | Feature pull requests, with CI green |
+| `main` | Production | Pull requests from `develop`/`dev` only, with CI green (the required `source branch` check refuses any other branch) |
+
+Nothing is pushed to `main` directly. A release is one pull request from `develop` to `main`. This repo and the internal docs have only `main`.
+
 ## How to use this repo
 
 - Diagrams in `system-design.md` are written in [Mermaid](https://mermaid.js.org/), which GitHub renders natively.
